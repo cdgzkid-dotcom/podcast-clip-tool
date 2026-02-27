@@ -37,20 +37,24 @@ CLAUDE_MODEL = "claude-sonnet-4-6"
 WHISPER_LANGUAGE = "es"
 
 # ── Subtítulos estilo TikTok ─────────────────────────────────────────────────
-SUBTITLE_FONT_SIZE = 72          # pt — grande, visible en mobile
-SUBTITLE_FONT_COLOR = "&H00FFFFFF"   # Blanco (ASS: AABBGGRR)
-SUBTITLE_OUTLINE_COLOR = "&H00000000"  # Negro
+SUBTITLE_FONT_SIZE = 88          # pt — grande y legible en mobile
+SUBTITLE_FONT_COLOR = "&H00FFFFFF"       # Blanco (ASS: AABBGGRR) — palabras futuras
+SUBTITLE_SECONDARY_COLOR = "&H0000FFFF" # Amarillo — relleno karaoke \kf
+SUBTITLE_OUTLINE_COLOR = "&H00000000"   # Negro
 SUBTITLE_OUTLINE_WIDTH = 4       # px
 SUBTITLE_BOLD = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom (estándar ASS)
 SUBTITLE_MARGIN_V = 80           # margen vertical desde el borde inferior
+SUBTITLE_WORDS_PER_LINE = 5      # palabras por línea en el karaoke
 
 # ── Video ────────────────────────────────────────────────────────────────────
 TARGET_ASPECT = "9:16"
+TARGET_WIDTH = 1080              # resolución objetivo (TikTok estándar)
+TARGET_HEIGHT = 1920
 HORIZONTAL_CROP_FILTER = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0"
 VIDEO_CODEC = "libx264"
 AUDIO_CODEC = "aac"
-VIDEO_CRF = 23                   # calidad de compresión (menor = mejor calidad)
+VIDEO_CRF = 18                   # calidad de compresión (menor = mejor calidad)
 VIDEO_PRESET = "fast"            # velocidad de encoding en Streamlit Cloud
 
 # ── Audio para Whisper ───────────────────────────────────────────────────────

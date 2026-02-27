@@ -22,6 +22,8 @@ from config import (
     SUBTITLE_MARGIN_V,
     SUBTITLE_OUTLINE_COLOR,
     SUBTITLE_OUTLINE_WIDTH,
+    SUBTITLE_SECONDARY_COLOR,
+    SUBTITLE_WORDS_PER_LINE,
     VIDEO_CODEC,
     VIDEO_CRF,
     VIDEO_PRESET,
@@ -69,14 +71,21 @@ def _seconds_to_ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-# ── Generación de ASS (karaoke palabra por palabra) ───────────────────────────
+# ── Generación de ASS (karaoke por líneas, estilo CapCut) ────────────────────
 
 def generate_word_ass(words: list, output_path: str) -> str:
     """
-    Genera un archivo ASS con una palabra por evento de diálogo.
+    Genera un archivo ASS con karaoke por líneas.
 
-    Cada palabra aparece sola en pantalla durante su duración (efecto karaoke).
-    Las palabras se muestran en MAYÚSCULAS para mayor impacto visual TikTok.
+    Agrupa palabras en líneas de SUBTITLE_WORDS_PER_LINE palabras.
+    Cada línea es UN ÚNICO evento Dialogue — esto elimina la superposición
+    de eventos que causaba el "apilamiento vertical" de palabras en pantalla.
+
+    Efecto visual (\\kf):
+    - Todas las palabras de la línea visibles en blanco (PrimaryColour)
+    - La palabra activa se va "llenando" de amarillo de izq. a der. (SecondaryColour)
+    - Las palabras ya dichas quedan en amarillo
+    → Lectura natural de izquierda a derecha y de arriba hacia abajo
 
     Args:
         words:       lista de dicts {start: float, end: float, word: str}
@@ -88,11 +97,11 @@ def generate_word_ass(words: list, output_path: str) -> str:
     if not words:
         raise ValueError("La lista de palabras está vacía. ¿El transcript falló?")
 
-    # Construir header
+    # Header con SecondaryColour = amarillo para el efecto \kf
     header = _ASS_HEADER.format(
         fontsize=SUBTITLE_FONT_SIZE,
-        primary=SUBTITLE_FONT_COLOR,
-        secondary=SUBTITLE_FONT_COLOR,
+        primary=SUBTITLE_FONT_COLOR,        # blanco — palabras futuras
+        secondary=SUBTITLE_SECONDARY_COLOR,  # amarillo — relleno karaoke
         outline=SUBTITLE_OUTLINE_COLOR,
         back="&H00000000",
         bold=SUBTITLE_BOLD,
@@ -101,19 +110,41 @@ def generate_word_ass(words: list, output_path: str) -> str:
         margin_v=SUBTITLE_MARGIN_V,
     )
 
-    # Construir eventos (un Dialogue por palabra)
+    # Agrupar palabras en líneas de N palabras
+    n = SUBTITLE_WORDS_PER_LINE
+    lines = [words[i : i + n] for i in range(0, len(words), n)]
+
     events = []
-    for w in words:
-        start = _seconds_to_ass_time(w["start"])
-        # Extender ligeramente el fin para que la palabra no desaparezca
-        # demasiado abruptamente (mínimo 0.1s extra, máximo hasta la sig. palabra)
-        end_secs = w["end"] + 0.05
-        end = _seconds_to_ass_time(end_secs)
+    for line_words in lines:
+        if not line_words:
+            continue
 
-        # Texto en mayúsculas, escape de caracteres especiales ASS
-        text = w["word"].upper().replace("{", "\\{").replace("}", "\\}")
+        # Tiempo de inicio y fin de la línea completa
+        line_start = _seconds_to_ass_time(line_words[0]["start"])
+        line_end   = _seconds_to_ass_time(line_words[-1]["end"] + 0.05)
 
-        events.append(_ASS_DIALOGUE.format(start=start, end=end, text=text))
+        # Construir texto con tags \kf por cada palabra
+        # \kf{cs}: karaoke fill — la palabra se "llena" de amarillo en cs centisegundos
+        parts = []
+        for i, w in enumerate(line_words):
+            # Duración de esta palabra en centisegundos
+            if i < len(line_words) - 1:
+                # De inicio de esta palabra a inicio de la siguiente
+                duration_sec = line_words[i + 1]["start"] - w["start"]
+            else:
+                # Última palabra: de su inicio a su fin
+                duration_sec = w["end"] - w["start"]
+
+            cs = max(1, int(duration_sec * 100))
+            text = w["word"].upper().replace("{", "\\{").replace("}", "\\}")
+            parts.append(f"{{\\kf{cs}}}{text}")
+
+        line_text = " ".join(parts)
+        events.append(_ASS_DIALOGUE.format(
+            start=line_start,
+            end=line_end,
+            text=line_text,
+        ))
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(header)
@@ -126,7 +157,10 @@ def generate_word_ass(words: list, output_path: str) -> str:
 
 def words_to_srt(words: list, output_path: str) -> str:
     """
-    Genera un archivo SRT con una palabra por cue.
+    Genera un archivo SRT agrupando palabras en líneas de SUBTITLE_WORDS_PER_LINE.
+
+    Consistente con el karaoke ASS: cada cue SRT = una línea completa de N palabras,
+    lo que hace el archivo SRT legible como subtítulo externo.
 
     Args:
         words:       lista de dicts {start: float, end: float, word: str}
@@ -138,14 +172,18 @@ def words_to_srt(words: list, output_path: str) -> str:
     if not words:
         raise ValueError("La lista de palabras está vacía.")
 
-    lines = []
-    for i, w in enumerate(words, start=1):
-        start = _seconds_to_srt_time(w["start"])
-        end = _seconds_to_srt_time(w["end"] + 0.05)
-        lines.append(f"{i}\n{start} --> {end}\n{w['word'].upper()}\n")
+    n = SUBTITLE_WORDS_PER_LINE
+    groups = [words[i : i + n] for i in range(0, len(words), n)]
+
+    cues = []
+    for idx, group in enumerate(groups, start=1):
+        start = _seconds_to_srt_time(group[0]["start"])
+        end   = _seconds_to_srt_time(group[-1]["end"] + 0.05)
+        text  = " ".join(w["word"].upper() for w in group)
+        cues.append(f"{idx}\n{start} --> {end}\n{text}\n")
 
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+        f.write("\n".join(cues))
 
     return output_path
 

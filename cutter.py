@@ -15,6 +15,8 @@ import tempfile
 from config import (
     AUDIO_CODEC,
     HORIZONTAL_CROP_FILTER,
+    TARGET_HEIGHT,
+    TARGET_WIDTH,
     VIDEO_CODEC,
     VIDEO_CRF,
     VIDEO_PRESET,
@@ -113,11 +115,15 @@ def crop_to_vertical(input_path: str, output_path: str) -> str:
     Returns:
         output_path si éxito
     """
+    # Crop 16:9 → 9:16 y escalar al tamaño objetivo 1080×1920.
+    # Sin scale, un Zoom de 1280×720 quedaría en 405×720 (muy pequeño).
+    crop_and_scale = f"{HORIZONTAL_CROP_FILTER},scale={TARGET_WIDTH}:{TARGET_HEIGHT}"
+
     cmd = [
         "ffmpeg",
         "-y",
         "-i", input_path,
-        "-vf", HORIZONTAL_CROP_FILTER,
+        "-vf", crop_and_scale,
         "-c:v", VIDEO_CODEC,
         "-crf", str(VIDEO_CRF),
         "-preset", VIDEO_PRESET,
@@ -173,10 +179,12 @@ def process_video(
         if orientation == "horizontal":
             crop_to_vertical(tmp_cut_path, output_path)
         else:
-            # Vertical: solo re-encodar para garantizar formato limpio
+            # Vertical: re-encodar y escalar a 1080×1920.
+            # Para iPhone en 4K hace downscale; para 720p hace upscale suave.
             cmd = [
                 "ffmpeg", "-y",
                 "-i", tmp_cut_path,
+                "-vf", f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}",
                 "-c:v", VIDEO_CODEC,
                 "-crf", str(VIDEO_CRF),
                 "-preset", VIDEO_PRESET,
