@@ -1,20 +1,17 @@
 """
-cutter.py — Corte y procesamiento de video con ffmpeg.
+cutter.py — Corte de audio y generación de video con ffmpeg.
 
 Responsabilidades:
-- Detectar orientación del video (vertical 9:16 vs horizontal 16:9)
-- Cortar clip por timestamps
-- Aplicar center crop de 16:9 a 9:16 para videos de Zoom
+- Cortar segmento de audio por timestamps
+- Crear video a partir de imagen de fondo + audio (para Instagram Reels)
 """
 
-import json
 import os
 import subprocess
 import tempfile
 
 from config import (
     AUDIO_CODEC,
-    HORIZONTAL_CROP_FILTER,
     TARGET_HEIGHT,
     TARGET_WIDTH,
     VIDEO_CODEC,
@@ -23,181 +20,135 @@ from config import (
 )
 
 
-def detect_orientation(filepath: str) -> str:
+def cut_audio(input_path: str, start_sec: float, end_sec: float, output_path: str) -> str:
     """
-    Detecta la orientación del video usando ffprobe.
-
-    Returns:
-        "vertical"   si height > width  (iPhone, ya listo para TikTok)
-        "horizontal" si width >= height (Zoom, necesita center crop)
-    """
-    cmd = [
-        "ffprobe",
-        "-v", "quiet",
-        "-print_format", "json",
-        "-show_streams",
-        filepath,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    data = json.loads(result.stdout)
-
-    # Buscar el stream de video
-    width, height = None, None
-    for stream in data.get("streams", []):
-        if stream.get("codec_type") == "video":
-            width = int(stream.get("width", 0))
-            height = int(stream.get("height", 0))
-            # Considerar rotación (ej: iPhone puede reportar 1920x1080 con rotate=90)
-            rotation = 0
-            tags = stream.get("tags", {})
-            if "rotate" in tags:
-                rotation = abs(int(tags["rotate"]))
-            # Con side_data también puede venir la rotación
-            for sd in stream.get("side_data_list", []):
-                if sd.get("side_data_type") == "Display Matrix":
-                    rotation = abs(int(sd.get("rotation", 0)))
-            # Si hay rotación de 90 o 270 grados, intercambiar ancho/alto
-            if rotation in (90, 270):
-                width, height = height, width
-            break
-
-    if width is None or height is None:
-        raise ValueError(f"No se pudo determinar las dimensiones de: {filepath}")
-
-    return "vertical" if height > width else "horizontal"
-
-
-def cut_clip(input_path: str, start_time: str, end_time: str, output_path: str) -> str:
-    """
-    Corta un clip del video entre start_time y end_time.
+    Corta un segmento de audio entre start_sec y end_sec.
 
     Args:
-        input_path:  ruta al video original
-        start_time:  tiempo de inicio en formato HH:MM:SS o segundos
-        end_time:    tiempo de fin en formato HH:MM:SS o segundos
-        output_path: ruta de destino del clip
+        input_path:  ruta al audio original (MP3, M4A, WAV)
+        start_sec:   tiempo de inicio en segundos
+        end_sec:     tiempo de fin en segundos
+        output_path: ruta de destino del clip (MP3)
 
     Returns:
         output_path si éxito
+
+    Raises:
+        RuntimeError: si ffmpeg falla
     """
     cmd = [
         "ffmpeg",
-        "-y",                    # sobreescribir si existe
-        "-ss", str(start_time),  # seek input (más rápido antes de -i)
-        "-to", str(end_time),
+        "-y",
+        "-ss", str(start_sec),
+        "-to", str(end_sec),
         "-i", input_path,
-        "-c:v", VIDEO_CODEC,
-        "-crf", str(VIDEO_CRF),
-        "-preset", VIDEO_PRESET,
         "-c:a", AUDIO_CODEC,
+        "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         output_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
-            f"ffmpeg falló al cortar el clip.\n"
+            f"ffmpeg falló al cortar el audio.\n"
             f"Comando: {' '.join(cmd)}\n"
             f"Error: {result.stderr}"
         )
     return output_path
 
 
-def crop_to_vertical(input_path: str, output_path: str) -> str:
+def create_video_from_audio(
+    background_image_path: str,
+    audio_path: str,
+    output_path: str,
+) -> str:
     """
-    Aplica center crop de 16:9 a 9:16.
-    Fórmula: crop=ih*9/16:ih:(iw-ih*9/16)/2:0
+    Crea un video de Instagram Reels (1080×1920) a partir de:
+    - Una imagen de fondo estática (escalada/recortada para llenar el frame)
+    - Un audio de clip (MP3/AAC)
+
+    La imagen se escala para LLENAR completamente el frame 1080×1920
+    (puede recortar ligeramente si el aspect ratio no es 9:16 exacto).
 
     Args:
-        input_path:  video horizontal (16:9)
-        output_path: video vertical (9:16) resultante
+        background_image_path: ruta a la imagen de fondo (JPG o PNG)
+        audio_path:            ruta al audio del clip (MP3 o AAC)
+        output_path:           ruta de destino del video MP4
 
     Returns:
         output_path si éxito
+
+    Raises:
+        RuntimeError: si ffmpeg falla
     """
-    # Crop 16:9 → 9:16 y escalar al tamaño objetivo 1080×1920.
-    # Sin scale, un Zoom de 1280×720 quedaría en 405×720 (muy pequeño).
-    crop_and_scale = f"{HORIZONTAL_CROP_FILTER},scale={TARGET_WIDTH}:{TARGET_HEIGHT}"
+    # Escalar para llenar 1080×1920 (crop si aspect ratio difiere)
+    scale_filter = (
+        f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
+        f"force_original_aspect_ratio=increase,"
+        f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}"
+    )
 
     cmd = [
         "ffmpeg",
         "-y",
-        "-i", input_path,
-        "-vf", crop_and_scale,
+        "-loop", "1",           # repetir imagen indefinidamente
+        "-framerate", "1",      # 1 fps suficiente para imagen estática
+        "-i", background_image_path,
+        "-i", audio_path,
+        "-vf", scale_filter,
         "-c:v", VIDEO_CODEC,
+        "-tune", "stillimage",  # optimiza para imagen estática
         "-crf", str(VIDEO_CRF),
         "-preset", VIDEO_PRESET,
         "-c:a", AUDIO_CODEC,
+        "-b:a", "192k",
+        "-pix_fmt", "yuv420p",  # compatibilidad máxima
+        "-shortest",            # terminar cuando el audio termine
         output_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
-            f"ffmpeg falló al hacer crop.\n"
+            f"ffmpeg falló al crear el video.\n"
+            f"Comando: {' '.join(cmd)}\n"
             f"Error: {result.stderr}"
         )
     return output_path
 
 
-def process_video(
-    input_path: str,
-    start_time: str,
-    end_time: str,
-    output_path: str,
+def process_clip(
+    audio_input_path: str,
+    start_sec: float,
+    end_sec: float,
+    background_image_path: str,
+    output_video_path: str,
 ) -> str:
     """
-    Pipeline completo: corta el clip y aplica crop si es horizontal.
+    Pipeline completo para un clip:
+    1. Cortar segmento de audio
+    2. Crear video con imagen de fondo + audio cortado
 
-    Flujo:
-        1. Cortar clip → archivo temporal
-        2. Detectar orientación del clip cortado
-        3. Si horizontal → center crop → output_path
-        4. Si vertical → mover a output_path directamente
+    El quemado de subtítulos se hace DESPUÉS en app.py con burn_subtitles().
 
     Args:
-        input_path:  video original (MOV o MP4)
-        start_time:  "HH:MM:SS" o segundos flotantes
-        end_time:    "HH:MM:SS" o segundos flotantes
-        output_path: destino final del clip procesado
+        audio_input_path:      audio original del episodio
+        start_sec:             inicio del clip en segundos
+        end_sec:               fin del clip en segundos
+        background_image_path: imagen de fondo para el video
+        output_video_path:     destino del video sin subtítulos
 
     Returns:
-        output_path
+        output_video_path
     """
-    # Crear archivo temporal para el clip sin crop
-    suffix = os.path.splitext(input_path)[1] or ".mp4"
+    suffix = os.path.splitext(audio_input_path)[1] or ".mp3"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp_cut_path = tmp.name
+        tmp_audio_path = tmp.name
 
     try:
-        # Paso 1: cortar
-        cut_clip(input_path, start_time, end_time, tmp_cut_path)
-
-        # Paso 2: detectar orientación del clip ya cortado
-        orientation = detect_orientation(tmp_cut_path)
-
-        # Paso 3: crop si es necesario
-        if orientation == "horizontal":
-            crop_to_vertical(tmp_cut_path, output_path)
-        else:
-            # Vertical: re-encodar y escalar a 1080×1920.
-            # Para iPhone en 4K hace downscale; para 720p hace upscale suave.
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", tmp_cut_path,
-                "-vf", f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}",
-                "-c:v", VIDEO_CODEC,
-                "-crf", str(VIDEO_CRF),
-                "-preset", VIDEO_PRESET,
-                "-c:a", AUDIO_CODEC,
-                output_path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                raise RuntimeError(f"ffmpeg falló al re-encodar: {result.stderr}")
-
+        cut_audio(audio_input_path, start_sec, end_sec, tmp_audio_path)
+        create_video_from_audio(background_image_path, tmp_audio_path, output_video_path)
     finally:
-        # Limpiar temporal
-        if os.path.exists(tmp_cut_path):
-            os.unlink(tmp_cut_path)
+        if os.path.exists(tmp_audio_path):
+            os.unlink(tmp_audio_path)
 
-    return output_path
+    return output_video_path

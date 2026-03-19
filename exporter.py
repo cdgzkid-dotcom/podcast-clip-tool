@@ -9,32 +9,31 @@ Responsabilidades:
 
 import os
 
-from config import PODCAST_NAME
-
-
-def build_filename(clip_index: int, episode_number: int) -> str:
+def build_filename(clip_index: int, episode_number: int, podcast_slug: str) -> str:
     """
     Construye el nombre base del clip (sin extensión).
 
     Ejemplo: clip_01_ladrando-ideas_ep05
+             clip_01_ftbp_ep03
 
     Args:
         clip_index:     índice del clip (1-based)
         episode_number: número del episodio
+        podcast_slug:   slug del podcast ("ladrando-ideas" | "ftbp")
 
     Returns:
         Nombre base sin extensión
     """
-    return f"clip_{clip_index:02d}_{PODCAST_NAME}_ep{episode_number:02d}"
+    return f"clip_{clip_index:02d}_{podcast_slug}_ep{episode_number:02d}"
 
 
 def package_clip_output(
     clip_index: int,
     episode_number: int,
+    podcast_slug: str,
     video_path: str,
     srt_path: str,
     transcript_text: str,
-    tiktok_caption: str,
     instagram_caption: str,
 ) -> dict:
     """
@@ -47,10 +46,10 @@ def package_clip_output(
     Args:
         clip_index:        índice del clip (1-based)
         episode_number:    número del episodio
+        podcast_slug:      slug del podcast ("ladrando-ideas" | "ftbp")
         video_path:        ruta al video MP4 con subtítulos quemados
         srt_path:          ruta al archivo SRT
         transcript_text:   texto plano del transcript del clip
-        tiktok_caption:    caption generado para TikTok
         instagram_caption: caption generado para Instagram
 
     Returns:
@@ -60,14 +59,13 @@ def package_clip_output(
             "video_bytes":       bytes — video listo para st.download_button,
             "srt_bytes":         bytes — SRT listo para st.download_button,
             "transcript":        str   — texto del transcript,
-            "tiktok_caption":    str   — caption TikTok,
             "instagram_caption": str   — caption Instagram,
         }
 
     Raises:
         FileNotFoundError: si video_path o srt_path no existen
     """
-    filename_base = build_filename(clip_index, episode_number)
+    filename_base = build_filename(clip_index, episode_number, podcast_slug)
 
     with open(video_path, "rb") as f:
         video_bytes = f.read()
@@ -80,6 +78,5 @@ def package_clip_output(
         "video_bytes":       video_bytes,
         "srt_bytes":         srt_bytes,
         "transcript":        transcript_text,
-        "tiktok_caption":    tiktok_caption,
         "instagram_caption": instagram_caption,
     }

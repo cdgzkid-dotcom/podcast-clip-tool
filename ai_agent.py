@@ -11,34 +11,36 @@ import re
 
 import anthropic
 
-from config import CLAUDE_MODEL, PODCAST_NAME, get_secret
+from config import CLAUDE_MODEL, CLIP_DURATION_SECONDS, CLIP_DURATION_TOLERANCE, get_secret
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 
 _VIRAL_SYSTEM_PROMPT = """Eres un experto en contenido viral para redes sociales,
 especializado en podcasts en español latinoamericano. Tu tarea es identificar
 los momentos más poderosos de un transcript de podcast que funcionarían como
-clips standalone en TikTok e Instagram Reels.
+clips de Instagram Reels.
 
 Un buen momento viral tiene:
 - Un hook fuerte en los primeros 3 segundos (pregunta, afirmación sorprendente,
   contradicción, o historia)
 - Una idea completa y comprensible sin contexto externo
 - Valor emocional o informativo claro (humor, aprendizaje, inspiración, sorpresa)
-- Inicio y fin naturales (no cortado en medio de una oración)
+- Inicio exacto al comienzo de una oración o idea — NUNCA a mitad de frase
+- Fin exacto al terminar una oración o idea — NUNCA cortando una palabra o frase
 
 Responde ÚNICAMENTE con JSON válido, sin markdown, sin explicaciones, sin texto
 adicional antes o después del JSON."""
 
 _VIRAL_USER_TEMPLATE = """Analiza este transcript del episodio {episode_number} del
-podcast "{podcast_name}" y encuentra los 3 mejores momentos para clips virales.
+podcast "{podcast_name}" y encuentra los 3 mejores momentos para clips de Instagram Reels.
 
-RESTRICCIONES IMPORTANTES:
-- Cada clip debe durar entre {min_duration} y {max_duration} segundos
-- Los timestamps son en segundos desde el inicio del video
+RESTRICCIONES CRÍTICAS:
+- Cada clip debe durar exactamente alrededor de {target_duration} segundos
+  (entre {min_duration}s y {max_duration}s es aceptable)
+- El inicio DEBE coincidir con el comienzo de una oración — jamás a mitad de palabra
+- El fin DEBE coincidir con el final completo de una oración — jamás cortando
 - Los momentos deben ser autocontenidos (comprensibles sin contexto extra)
-- El inicio del clip debe coincidir con el inicio de una oración o idea
-- El fin del clip debe coincidir con el final de una oración o idea
+- Usa los timestamps [MM:SS] del transcript para calcular duraciones
 
 TRANSCRIPT (formato [MM:SS] texto):
 {transcript}
@@ -59,26 +61,9 @@ Responde con este JSON exacto (sin markdown):
 
 _CAPTION_SYSTEM_PROMPT = """Eres un experto en copywriting para redes sociales,
 especializado en contenido de podcasts en español latinoamericano.
-Creas captions que maximizan el engagement y el crecimiento orgánico."""
+Creas captions que maximizan el engagement y el crecimiento orgánico en Instagram."""
 
-_CAPTION_TIKTOK_TEMPLATE = """Crea un caption para TikTok para este clip del
-episodio {episode_number} del podcast "{podcast_name}".
-
-TRANSCRIPT DEL CLIP:
-{clip_transcript}
-
-REQUISITOS DEL CAPTION:
-- Máximo 150 caracteres para el texto principal (TikTok trunca)
-- Empieza con un hook que genere curiosidad o FOMO
-- Usa 1 pregunta retórica si aplica
-- Incluye un call-to-action sutil (ej: "¿Te pasó algo así?", "Comenta tu opinión")
-- Termina con 3-5 hashtags relevantes en español + algunos en inglés para alcance
-- Tono conversacional, cercano, no formal
-- El caption debe funcionar como un teaser que complemente el video
-
-Responde solo con el caption, sin comillas, sin explicaciones."""
-
-_CAPTION_INSTAGRAM_TEMPLATE = """Crea un caption para Instagram para este clip del
+_CAPTION_INSTAGRAM_TEMPLATE = """Crea un caption para Instagram Reels para este clip del
 episodio {episode_number} del podcast "{podcast_name}".
 
 TRANSCRIPT DEL CLIP:
@@ -91,7 +76,7 @@ REQUISITOS DEL CAPTION:
 - Call-to-action: pregunta que invite a comentar o guardar
 - Hashtags: 8-12 hashtags, mezcla de nicho + generales en español e inglés
 - Separa el cuerpo de los hashtags con una línea en blanco
-- Tono reflexivo pero accesible
+- Tono reflexivo pero accesible, conversacional
 
 Responde solo con el caption, sin comillas, sin explicaciones."""
 
@@ -101,17 +86,18 @@ Responde solo con el caption, sin comillas, sin explicaciones."""
 def detect_viral_moments(
     transcript_text: str,
     episode_number: int,
-    min_duration: int = 30,
-    max_duration: int = 90,
+    podcast_name: str,
 ) -> list[dict]:
     """
     Usa Claude para detectar los 3 mejores momentos virales del transcript.
 
+    Duración objetivo: CLIP_DURATION_SECONDS (60s) ± CLIP_DURATION_TOLERANCE (5s).
+    Los timestamps retornados se snapean después a límites de palabras en app.py.
+
     Args:
         transcript_text: transcript formateado con timestamps ([MM:SS] texto)
         episode_number:  número del episodio
-        min_duration:    duración mínima del clip en segundos
-        max_duration:    duración máxima del clip en segundos
+        podcast_name:    nombre del podcast para el prompt
 
     Returns:
         Lista de hasta 3 dicts con keys:
@@ -123,11 +109,15 @@ def detect_viral_moments(
     """
     client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
 
+    target = CLIP_DURATION_SECONDS
+    tolerance = CLIP_DURATION_TOLERANCE
+
     user_message = _VIRAL_USER_TEMPLATE.format(
         episode_number=episode_number,
-        podcast_name=PODCAST_NAME,
-        min_duration=min_duration,
-        max_duration=max_duration,
+        podcast_name=podcast_name,
+        target_duration=target,
+        min_duration=target - tolerance,
+        max_duration=target + tolerance,
         transcript=transcript_text,
     )
 
@@ -173,32 +163,27 @@ def detect_viral_moments(
     return validated[:3]  # máximo 3 momentos
 
 
-def generate_caption(
+def generate_instagram_caption(
     clip_transcript: str,
     episode_number: int,
-    platform: str,
+    podcast_name: str,
 ) -> str:
     """
-    Genera un caption optimizado para TikTok o Instagram.
+    Genera un caption optimizado para Instagram Reels.
 
     Args:
         clip_transcript: texto del transcript del clip
         episode_number:  número del episodio
-        platform:        "tiktok" | "instagram"
+        podcast_name:    nombre del podcast
 
     Returns:
         Caption como string listo para copiar/pegar
     """
     client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
 
-    if platform == "tiktok":
-        template = _CAPTION_TIKTOK_TEMPLATE
-    else:
-        template = _CAPTION_INSTAGRAM_TEMPLATE
-
-    user_message = template.format(
+    user_message = _CAPTION_INSTAGRAM_TEMPLATE.format(
         episode_number=episode_number,
-        podcast_name=PODCAST_NAME,
+        podcast_name=podcast_name,
         clip_transcript=clip_transcript,
     )
 
@@ -213,19 +198,6 @@ def generate_caption(
         raise RuntimeError(f"Error al llamar a la Claude API: {e}") from e
 
     return response.content[0].text.strip()
-
-
-def generate_both_captions(
-    clip_transcript: str,
-    episode_number: int,
-) -> dict:
-    """
-    Genera captions para TikTok e Instagram en una sola llamada.
-    Retorna dict con keys "tiktok" y "instagram".
-    """
-    tiktok = generate_caption(clip_transcript, episode_number, "tiktok")
-    instagram = generate_caption(clip_transcript, episode_number, "instagram")
-    return {"tiktok": tiktok, "instagram": instagram}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

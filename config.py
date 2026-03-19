@@ -36,7 +36,25 @@ WHISPER_MODEL = "whisper-1"
 CLAUDE_MODEL = "claude-sonnet-4-6"
 WHISPER_LANGUAGE = "es"
 
-# ── Subtítulos estilo TikTok ─────────────────────────────────────────────────
+# ── Podcasts ──────────────────────────────────────────────────────────────────
+PODCASTS = {
+    "ladrando-ideas": {
+        "display_name": "Ladrando Ideas",
+        "slug": "ladrando-ideas",
+    },
+    "ftbp": {
+        "display_name": "Fuck The Business Plan",
+        "slug": "ftbp",
+    },
+}
+PODCAST_DISPLAY_NAMES = [p["display_name"] for p in PODCASTS.values()]
+
+# ── Clips ─────────────────────────────────────────────────────────────────────
+CLIP_DURATION_SECONDS = 60       # duración objetivo de cada clip (exacta)
+CLIP_DURATION_TOLERANCE = 5      # ±segundos aceptables por corte natural
+MAX_VIRAL_MOMENTS = 3
+
+# ── Subtítulos estilo Instagram Reels ────────────────────────────────────────
 SUBTITLE_FONT_SIZE = 88          # pt — grande y legible en mobile
 SUBTITLE_FONT_COLOR = "&H00FFFFFF"       # Blanco (ASS: AABBGGRR) — palabras futuras
 SUBTITLE_SECONDARY_COLOR = "&H0000FFFF" # Amarillo — relleno karaoke \kf
@@ -49,9 +67,8 @@ SUBTITLE_WORDS_PER_LINE = 5      # palabras por línea en el karaoke
 
 # ── Video ────────────────────────────────────────────────────────────────────
 TARGET_ASPECT = "9:16"
-TARGET_WIDTH = 1080              # resolución objetivo (TikTok estándar)
+TARGET_WIDTH = 1080              # resolución Instagram Reels estándar
 TARGET_HEIGHT = 1920
-HORIZONTAL_CROP_FILTER = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0"
 VIDEO_CODEC = "libx264"
 AUDIO_CODEC = "aac"
 VIDEO_CRF = 18                   # calidad de compresión (menor = mejor calidad)
@@ -62,16 +79,13 @@ AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHANNELS = 1
 AUDIO_BITRATE = "32k"
 AUDIO_FORMAT = "mp3"
+SUPPORTED_AUDIO_FORMATS = ["mp3", "m4a", "wav", "MP3", "M4A", "WAV"]
 
 # ── Naming de archivos ───────────────────────────────────────────────────────
-PODCAST_NAME = "ladrando-ideas"
 OUTPUT_VIDEO_EXT = ".mp4"
 OUTPUT_AUDIO_EXT = ".mp3"
 OUTPUT_SUBTITLE_EXT = ".srt"
 
 # ── UI ───────────────────────────────────────────────────────────────────────
-APP_TITLE = "🎙️ Podcast Clip Tool — Ladrando Ideas"
+APP_TITLE = "🎙️ Podcast Clip Tool"
 MAX_UPLOAD_MB = 500
-DEFAULT_MIN_DURATION = 30        # segundos
-DEFAULT_MAX_DURATION = 90        # segundos
-MAX_VIRAL_MOMENTS = 3

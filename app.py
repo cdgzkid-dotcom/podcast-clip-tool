@@ -1,15 +1,15 @@
 """
-app.py — Interfaz principal del Podcast Clip Tool.
-
-Modos:
-  - Manual:    el usuario proporciona timestamps de inicio y fin
-  - Automático: Claude detecta los 3 mejores momentos virales
+app.py — Podcast Clip Tool (Ladrando Ideas + FTBP)
 
 Flujo:
-  1. Subir video (MOV o MP4, hasta 500 MB)
-  2. Seleccionar modo y configurar parámetros
-  3. Generar clips → video + SRT + captions + transcript
-  4. Descargar resultados
+  1. Seleccionar podcast (Ladrando Ideas / Fuck The Business Plan)
+  2. Subir imagen de fondo para ese podcast
+  3. Subir episodio completo en MP3 (o M4A/WAV)
+  4. Ingresar número de episodio
+  5. Analizar → Whisper transcribe + Claude detecta 3 momentos de ~60s
+  6. Revisar momentos (timestamps editables), seleccionar
+  7. Generar clips → video 1080×1920 con imagen de fondo + subtítulos + caption Instagram
+  8. Descargar MP4 + SRT
 """
 
 import os
@@ -21,19 +21,20 @@ import streamlit as st
 
 from config import (
     APP_TITLE,
-    DEFAULT_MAX_DURATION,
-    DEFAULT_MIN_DURATION,
+    CLIP_DURATION_SECONDS,
     MAX_UPLOAD_MB,
     MAX_VIRAL_MOMENTS,
-    OUTPUT_AUDIO_EXT,
     OUTPUT_SUBTITLE_EXT,
     OUTPUT_VIDEO_EXT,
+    PODCAST_DISPLAY_NAMES,
+    PODCASTS,
+    SUPPORTED_AUDIO_FORMATS,
     WHISPER_LANGUAGE,
 )
-from cutter import process_video
-from transcriber import transcribe, transcribe_clip, format_for_claude, get_words_in_range, get_text_in_range
-from subtitles import generate_word_ass, words_to_srt, segments_to_srt, burn_subtitles
-from ai_agent import detect_viral_moments, generate_both_captions
+from cutter import process_clip
+from transcriber import transcribe, format_for_claude, get_words_in_range, get_text_in_range, snap_to_word_boundaries
+from subtitles import generate_word_ass, words_to_srt, burn_subtitles
+from ai_agent import detect_viral_moments, generate_instagram_caption
 from exporter import package_clip_output
 
 
@@ -44,11 +45,9 @@ def _hhmmss_to_seconds(time_str: str) -> float:
     parts = time_str.strip().split(":")
     try:
         if len(parts) == 3:
-            h, m, s = parts
-            return int(h) * 3600 + int(m) * 60 + float(s)
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
         elif len(parts) == 2:
-            m, s = parts
-            return int(m) * 60 + float(s)
+            return int(parts[0]) * 60 + float(parts[1])
         else:
             return float(parts[0])
     except (ValueError, IndexError):
@@ -63,126 +62,103 @@ def _seconds_to_hhmmss(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def _get_podcast_slug(display_name: str) -> str:
+    """Retorna el slug del podcast dado su nombre de display."""
+    for slug, info in PODCASTS.items():
+        if info["display_name"] == display_name:
+            return slug
+    return "podcast"
+
+
 def _get_or_create_temp_dir() -> str:
     """Retorna (o crea) el directorio temporal de la sesión."""
     if "temp_dir" not in st.session_state or not os.path.isdir(st.session_state.temp_dir):
         temp_dir = tempfile.mkdtemp(prefix="podcast_clip_")
         st.session_state.temp_dir = temp_dir
-        # Limpiar al cerrar la sesión (best-effort en Streamlit Cloud)
         atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
     return st.session_state.temp_dir
 
 
-def _save_upload(uploaded_file) -> str:
-    """Guarda el archivo subido en el directorio temporal y retorna la ruta."""
+def _save_upload(uploaded_file, prefix: str = "upload") -> str:
+    """Guarda un archivo subido en el directorio temporal y retorna la ruta."""
     temp_dir = _get_or_create_temp_dir()
-    suffix = os.path.splitext(uploaded_file.name)[1].lower() or ".mp4"
-    dest = os.path.join(temp_dir, f"source{suffix}")
+    suffix = os.path.splitext(uploaded_file.name)[1].lower() or ".bin"
+    dest = os.path.join(temp_dir, f"{prefix}{suffix}")
     with open(dest, "wb") as f:
         f.write(uploaded_file.getbuffer())
     return dest
 
 
-def _process_clip(
-    video_path: str,
+def _save_image_bytes(image_bytes: bytes, suffix: str = ".jpg") -> str:
+    """Guarda bytes de imagen en un archivo temporal y retorna la ruta."""
+    temp_dir = _get_or_create_temp_dir()
+    dest = os.path.join(temp_dir, f"bg{suffix}")
+    with open(dest, "wb") as f:
+        f.write(image_bytes)
+    return dest
+
+
+def _process_single_clip(
+    audio_path: str,
     start_sec: float,
     end_sec: float,
+    background_image_path: str,
     clip_index: int,
     episode_number: int,
+    podcast_slug: str,
     transcription: dict,
     temp_dir: str,
 ) -> dict:
     """
     Pipeline completo para un clip:
-      cut → crop → transcribe clip → subtítulos → burn → captions → package
-
-    Args:
-        video_path:     ruta al video original
-        start_sec:      inicio del clip en segundos
-        end_sec:        fin del clip en segundos
-        clip_index:     índice (1-based) para el nombre de archivo
-        episode_number: número del episodio
-        transcription:  dict de transcripción del video completo (puede ser None)
-        temp_dir:       directorio temporal de la sesión
-
-    Returns:
-        Dict retornado por package_clip_output()
+      cut audio → create video → subtitles → burn → caption → package
     """
     base = f"clip_{clip_index:02d}_ep{episode_number:02d}"
-
-    # Rutas de archivos temporales
-    video_out     = os.path.join(temp_dir, f"{base}_video{OUTPUT_VIDEO_EXT}")
+    video_no_subs = os.path.join(temp_dir, f"{base}_raw{OUTPUT_VIDEO_EXT}")
     ass_path      = os.path.join(temp_dir, f"{base}.ass")
     srt_path      = os.path.join(temp_dir, f"{base}{OUTPUT_SUBTITLE_EXT}")
     final_video   = os.path.join(temp_dir, f"{base}_final{OUTPUT_VIDEO_EXT}")
 
-    # 1. Cortar y hacer crop si es necesario
-    process_video(video_path, start_sec, end_sec, video_out)
+    # 1. Cortar audio + crear video con imagen de fondo
+    process_clip(audio_path, start_sec, end_sec, background_image_path, video_no_subs)
 
-    # 2. Obtener palabras del clip (del transcript del video completo o transcribir el clip)
-    if transcription and transcription.get("words"):
-        words = get_words_in_range(transcription, start_sec, end_sec)
-        clip_text = get_text_in_range(transcription, start_sec, end_sec)
-    else:
-        # Transcribir directamente el clip recortado
-        clip_transcription = transcribe_clip(video_out, language=WHISPER_LANGUAGE)
-        words = clip_transcription.get("words", [])
-        clip_text = clip_transcription.get("text", "")
+    # 2. Obtener palabras del clip desde el transcript completo
+    words = get_words_in_range(transcription, start_sec, end_sec)
+    clip_text = get_text_in_range(transcription, start_sec, end_sec)
 
     # 3. Generar subtítulos
     if words:
         generate_word_ass(words, ass_path)
         words_to_srt(words, srt_path)
+        burn_subtitles(video_no_subs, ass_path, final_video)
     else:
-        # Fallback a segmentos si no hay word-level timestamps
-        if transcription and transcription.get("segments"):
-            segs = [
-                s for s in transcription["segments"]
-                if s["start"] >= start_sec and s["end"] <= end_sec
-            ]
-            # Re-normalizar tiempos al inicio del clip
-            segs_norm = [
-                {"start": s["start"] - start_sec, "end": s["end"] - start_sec, "text": s["text"]}
-                for s in segs
-            ]
-            segments_to_srt(segs_norm, srt_path)
-        else:
-            # SRT vacío como fallback final
-            with open(srt_path, "w", encoding="utf-8") as f:
-                f.write("")
-        # Sin ASS → no quemar subtítulos
-        ass_path = None
+        # Sin palabras → video sin subtítulos
+        final_video = video_no_subs
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write("")
 
-    # 4. Quemar subtítulos en el video (si hay ASS)
-    if ass_path and os.path.exists(ass_path):
-        burn_subtitles(video_out, ass_path, final_video)
-    else:
-        # Sin subtítulos → usar el video tal cual
-        final_video = video_out
+    # 4. Generar caption Instagram
+    podcast_display = PODCASTS[podcast_slug]["display_name"]
+    instagram_caption = generate_instagram_caption(clip_text, episode_number, podcast_display)
 
-    # 5. Generar captions con Claude
-    captions = generate_both_captions(clip_text, episode_number)
-
-    # 6. Empaquetar para descarga
+    # 5. Empaquetar para descarga
     return package_clip_output(
         clip_index=clip_index,
         episode_number=episode_number,
+        podcast_slug=podcast_slug,
         video_path=final_video,
         srt_path=srt_path,
         transcript_text=clip_text,
-        tiktok_caption=captions["tiktok"],
-        instagram_caption=captions["instagram"],
+        instagram_caption=instagram_caption,
     )
 
 
 def _render_clip_result(result: dict, clip_number: int) -> None:
-    """Renderiza los resultados de un clip (video, descargas, captions, transcript)."""
-    st.subheader(f"Clip {clip_number}: `{result['filename_base']}`")
+    """Renderiza los resultados de un clip."""
+    st.subheader(f"Clip {clip_number} — `{result['filename_base']}`")
 
-    # Preview del video
     st.video(result["video_bytes"])
 
-    # Botones de descarga
     col1, col2 = st.columns(2)
     col1.download_button(
         label="⬇️ Descargar MP4",
@@ -199,14 +175,9 @@ def _render_clip_result(result: dict, clip_number: int) -> None:
         key=f"dl_srt_{clip_number}",
     )
 
-    # Captions
-    with st.expander("📱 Caption TikTok", expanded=True):
-        st.code(result["tiktok_caption"], language=None)
-
-    with st.expander("📸 Caption Instagram"):
+    with st.expander("📸 Copy Instagram", expanded=True):
         st.code(result["instagram_caption"], language=None)
 
-    # Transcript
     with st.expander("📝 Transcript del clip"):
         st.text(result["transcript"] or "(sin transcript disponible)")
 
@@ -223,26 +194,74 @@ st.set_page_config(
 
 st.title(APP_TITLE)
 
-
 # ── Inicialización de session state ──────────────────────────────────────────
 
-defaults = {
-    "video_path":     None,
-    "transcription":  None,
-    "viral_moments":  None,
-    "clips_ready":    [],
-    "episode_number": 1,
-}
-for k, v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+for key, default in {
+    "audio_path":         None,
+    "audio_filename":     None,
+    "transcription":      None,
+    "viral_moments":      None,
+    "clips_ready":        [],
+    "episode_number":     1,
+    "bg_ladrando":        None,   # bytes de la imagen de Ladrando Ideas
+    "bg_ftbp":            None,   # bytes de la imagen de FTBP
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.header("⚙️ Configuración")
+    st.header("🎙️ Configuración")
 
+    # Selección de podcast
+    podcast_display = st.selectbox(
+        "Podcast",
+        options=PODCAST_DISPLAY_NAMES,
+        help="Cada podcast usa su propia imagen de fondo.",
+    )
+    podcast_slug = _get_podcast_slug(podcast_display)
+
+    st.markdown("---")
+
+    # Imágenes de fondo por podcast
+    st.subheader("🖼️ Imágenes de fondo")
+    st.caption("Se guardan durante la sesión — no necesitas subirlas cada vez.")
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        st.markdown("**Ladrando Ideas**")
+        img_ladrando = st.file_uploader(
+            "Imagen LI",
+            type=["jpg", "jpeg", "png"],
+            key="upload_bg_ladrando",
+            label_visibility="collapsed",
+        )
+        if img_ladrando:
+            st.session_state.bg_ladrando = img_ladrando.read()
+            st.image(st.session_state.bg_ladrando, use_container_width=True)
+        elif st.session_state.bg_ladrando:
+            st.image(st.session_state.bg_ladrando, use_container_width=True)
+
+    with col_b:
+        st.markdown("**FTBP**")
+        img_ftbp = st.file_uploader(
+            "Imagen FTBP",
+            type=["jpg", "jpeg", "png"],
+            key="upload_bg_ftbp",
+            label_visibility="collapsed",
+        )
+        if img_ftbp:
+            st.session_state.bg_ftbp = img_ftbp.read()
+            st.image(st.session_state.bg_ftbp, use_container_width=True)
+        elif st.session_state.bg_ftbp:
+            st.image(st.session_state.bg_ftbp, use_container_width=True)
+
+    st.markdown("---")
+
+    # Número de episodio
     episode_number = st.number_input(
         "Número de episodio",
         min_value=1,
@@ -252,259 +271,185 @@ with st.sidebar:
     )
     st.session_state.episode_number = episode_number
 
-    mode = st.radio(
-        "Modo",
-        options=["Manual", "Automático"],
-        help="**Manual**: proporciona timestamps exactos.\n\n**Automático**: Claude detecta los mejores momentos virales.",
+    st.markdown("---")
+    st.caption(
+        f"Clips: **{CLIP_DURATION_SECONDS}s** · "
+        f"Formatos: {', '.join(SUPPORTED_AUDIO_FORMATS[:3])} · "
+        f"Límite: {MAX_UPLOAD_MB} MB"
     )
 
-    if mode == "Automático":
-        st.markdown("---")
-        st.subheader("Duración del clip")
-        min_dur = st.slider(
-            "Mínimo (segundos)",
-            min_value=10,
-            max_value=60,
-            value=DEFAULT_MIN_DURATION,
-            step=5,
-        )
-        max_dur = st.slider(
-            "Máximo (segundos)",
-            min_value=30,
-            max_value=180,
-            value=DEFAULT_MAX_DURATION,
-            step=5,
-        )
-        if min_dur >= max_dur:
-            st.warning("La duración mínima debe ser menor que la máxima.")
 
-    st.markdown("---")
-    st.caption(f"Límite de subida: {MAX_UPLOAD_MB} MB · Formatos: MOV, MP4")
+# ── Verificar imagen de fondo disponible ─────────────────────────────────────
+
+bg_bytes = st.session_state.bg_ladrando if podcast_slug == "ladrando-ideas" else st.session_state.bg_ftbp
+
+if not bg_bytes:
+    st.warning(
+        f"⚠️ Sube la imagen de fondo para **{podcast_display}** en el sidebar antes de continuar."
+    )
 
 
-# ── Upload ────────────────────────────────────────────────────────────────────
+# ── Upload de audio ───────────────────────────────────────────────────────────
 
-uploaded_file = st.file_uploader(
-    "📤 Sube tu video del podcast",
-    type=["mp4", "mov", "MOV", "MP4"],
-    help=f"Máximo {MAX_UPLOAD_MB} MB. iPhone (MOV vertical) o Zoom (MP4 horizontal).",
+uploaded_audio = st.file_uploader(
+    "🎵 Sube el episodio completo (MP3, M4A o WAV)",
+    type=SUPPORTED_AUDIO_FORMATS,
+    help=f"El audio exportado para Spotify funciona directo. Máximo {MAX_UPLOAD_MB} MB.",
 )
 
-if uploaded_file:
-    # Guardar si es un archivo nuevo
-    if (
-        "uploaded_filename" not in st.session_state
-        or st.session_state.uploaded_filename != uploaded_file.name
-    ):
-        st.session_state.uploaded_filename = uploaded_file.name
-        st.session_state.video_path = _save_upload(uploaded_file)
-        # Resetear estado derivado al cambiar el video
-        st.session_state.transcription = None
+if uploaded_audio:
+    if st.session_state.audio_filename != uploaded_audio.name:
+        st.session_state.audio_filename  = uploaded_audio.name
+        st.session_state.audio_path      = _save_upload(uploaded_audio, prefix="episode")
+        # Reset estado derivado al cambiar el audio
+        st.session_state.transcription   = None
+        st.session_state.viral_moments   = None
+        st.session_state.clips_ready     = []
+
+    st.success(f"✅ Audio cargado: **{uploaded_audio.name}**")
+
+
+# ── Análisis automático ───────────────────────────────────────────────────────
+
+if st.session_state.audio_path and bg_bytes:
+    if st.button("🔍 Analizar episodio", type="primary"):
         st.session_state.viral_moments = None
-        st.session_state.clips_ready = []
+        st.session_state.clips_ready   = []
 
-    st.success(f"✅ Video cargado: **{uploaded_file.name}**")
-
-
-# ── Modo Manual ───────────────────────────────────────────────────────────────
-
-if mode == "Manual" and st.session_state.video_path:
-    st.header("✂️ Modo Manual")
-
-    col1, col2 = st.columns(2)
-    start_input = col1.text_input(
-        "Inicio del clip",
-        value="00:00:00",
-        help="Formato: HH:MM:SS o MM:SS",
-        key="manual_start",
-    )
-    end_input = col2.text_input(
-        "Fin del clip",
-        value="00:01:00",
-        help="Formato: HH:MM:SS o MM:SS",
-        key="manual_end",
-    )
-
-    if st.button("🎬 Generar Clip", type="primary", key="btn_manual"):
-        try:
-            start_sec = _hhmmss_to_seconds(start_input)
-            end_sec   = _hhmmss_to_seconds(end_input)
-        except ValueError as e:
-            st.error(str(e))
-            st.stop()
-
-        if end_sec <= start_sec:
-            st.error("El fin debe ser posterior al inicio.")
-            st.stop()
-
-        temp_dir = _get_or_create_temp_dir()
-        progress = st.progress(0, text="Procesando video...")
-
-        try:
-            progress.progress(20, text="Transcribiendo audio...")
-            transcription = transcribe(
-                st.session_state.video_path,
-                language=WHISPER_LANGUAGE,
-            )
-            st.session_state.transcription = transcription
-
-            progress.progress(60, text="Generando subtítulos y captions...")
-            result = _process_clip(
-                video_path=st.session_state.video_path,
-                start_sec=start_sec,
-                end_sec=end_sec,
-                clip_index=1,
-                episode_number=episode_number,
-                transcription=transcription,
-                temp_dir=temp_dir,
-            )
-
-            progress.progress(100, text="¡Listo!")
-            st.session_state.clips_ready = [result]
-
-        except Exception as e:
-            st.error(f"Error al generar el clip: {e}")
-            st.stop()
-
-        finally:
-            progress.empty()
-
-
-# ── Modo Automático ───────────────────────────────────────────────────────────
-
-elif mode == "Automático" and st.session_state.video_path:
-    st.header("🤖 Modo Automático")
-
-    # Paso 1: Analizar el video
-    if st.button("🔍 Analizar Video", type="primary", key="btn_analyze"):
-        st.session_state.viral_moments = None
-        st.session_state.clips_ready = []
-        temp_dir = _get_or_create_temp_dir()
-
-        with st.spinner("🎙️ Transcribiendo audio con Whisper..."):
+        with st.spinner("🎙️ Transcribiendo con Whisper... (puede tardar unos minutos)"):
             try:
-                transcription = transcribe(
-                    st.session_state.video_path,
-                    language=WHISPER_LANGUAGE,
-                )
+                transcription = transcribe(st.session_state.audio_path, language=WHISPER_LANGUAGE)
                 st.session_state.transcription = transcription
             except Exception as e:
                 st.error(f"Error en la transcripción: {e}")
                 st.stop()
 
-        with st.spinner("🧠 Detectando momentos virales con Claude..."):
+        with st.spinner("🧠 Detectando mejores momentos con Claude..."):
             try:
                 transcript_text = format_for_claude(transcription)
                 moments = detect_viral_moments(
                     transcript_text=transcript_text,
                     episode_number=episode_number,
-                    min_duration=min_dur,
-                    max_duration=max_dur,
+                    podcast_name=podcast_display,
                 )
+                # Snap timestamps a límites naturales de palabras
+                words_full = transcription.get("words", [])
+                for m in moments:
+                    snapped_start, snapped_end = snap_to_word_boundaries(
+                        m["start_time"], m["end_time"], words_full
+                    )
+                    m["start_time"] = snapped_start
+                    m["end_time"]   = snapped_end
+                    m["duration_seconds"] = round(snapped_end - snapped_start, 1)
+
                 st.session_state.viral_moments = moments
                 if not moments:
-                    st.warning("Claude no detectó momentos virales. Intenta con otros parámetros de duración.")
+                    st.warning("Claude no detectó momentos virales. Intenta con otro episodio.")
             except Exception as e:
                 st.error(f"Error al detectar momentos virales: {e}")
                 st.stop()
 
-    # Paso 2: Mostrar momentos detectados para ajuste y selección
-    if st.session_state.viral_moments:
-        st.subheader(f"📊 {len(st.session_state.viral_moments)} momentos detectados — ajusta y selecciona")
 
-        selected_clips = []
+# ── Mostrar momentos y generar clips ─────────────────────────────────────────
 
-        for i, moment in enumerate(st.session_state.viral_moments):
-            score = moment.get("viral_score", "—")
-            duration = moment.get("duration_seconds", "—")
-            hook = moment.get("hook", "")
-            reason = moment.get("reason", "")
+if st.session_state.viral_moments:
+    st.header(f"🎯 {len(st.session_state.viral_moments)} momentos detectados")
+    st.caption("Ajusta los timestamps si lo necesitas, luego genera los clips.")
 
-            with st.expander(
-                f"Momento {i + 1} · Score: {score}/10 · {duration}s",
-                expanded=True,
-            ):
-                st.markdown(f"**Hook:** _{hook}_")
-                st.markdown(f"**Por qué funciona:** {reason}")
+    selected_clips = []
 
-                c1, c2, c3 = st.columns([2, 2, 1])
-                start_val = _seconds_to_hhmmss(moment.get("start_time", 0))
-                end_val   = _seconds_to_hhmmss(moment.get("end_time", 0))
+    for i, moment in enumerate(st.session_state.viral_moments):
+        score    = moment.get("viral_score", "—")
+        duration = moment.get("duration_seconds", "—")
+        hook     = moment.get("hook", "")
+        reason   = moment.get("reason", "")
 
-                start_edited = c1.text_input(
-                    "Inicio",
-                    value=start_val,
-                    key=f"auto_start_{i}",
-                )
-                end_edited = c2.text_input(
-                    "Fin",
-                    value=end_val,
-                    key=f"auto_end_{i}",
-                )
-                include = c3.checkbox(
-                    "Incluir",
-                    value=True,
-                    key=f"auto_include_{i}",
-                )
-
-                if include:
-                    selected_clips.append({
-                        "index": i,
-                        "start": start_edited,
-                        "end":   end_edited,
-                    })
-
-        # Paso 3: Generar clips seleccionados
-        if selected_clips and st.button(
-            f"🎬 Generar {len(selected_clips)} clip(s) seleccionado(s)",
-            type="primary",
-            key="btn_auto_generate",
+        with st.expander(
+            f"Momento {i + 1}  ·  Score {score}/10  ·  {duration}s",
+            expanded=True,
         ):
-            temp_dir = _get_or_create_temp_dir()
-            results = []
-            progress = st.progress(0)
+            st.markdown(f"**Hook:** _{hook}_")
+            st.markdown(f"**Por qué funciona:** {reason}")
 
-            for pos, clip_info in enumerate(selected_clips, start=1):
-                pct = int((pos - 1) / len(selected_clips) * 100)
-                progress.progress(pct, text=f"Generando clip {pos}/{len(selected_clips)}...")
+            c1, c2, c3 = st.columns([2, 2, 1])
+            start_edited = c1.text_input(
+                "Inicio",
+                value=_seconds_to_hhmmss(moment.get("start_time", 0)),
+                key=f"start_{i}",
+            )
+            end_edited = c2.text_input(
+                "Fin",
+                value=_seconds_to_hhmmss(moment.get("end_time", 0)),
+                key=f"end_{i}",
+            )
+            include = c3.checkbox("Incluir", value=True, key=f"include_{i}")
 
-                try:
-                    start_sec = _hhmmss_to_seconds(clip_info["start"])
-                    end_sec   = _hhmmss_to_seconds(clip_info["end"])
-                except ValueError as e:
-                    st.error(f"Clip {pos}: {e}")
-                    continue
+            if include:
+                selected_clips.append({"start": start_edited, "end": end_edited})
 
-                if end_sec <= start_sec:
-                    st.error(f"Clip {pos}: el fin debe ser posterior al inicio.")
-                    continue
+    if selected_clips and st.button(
+        f"🎬 Generar {len(selected_clips)} clip(s)",
+        type="primary",
+    ):
+        temp_dir = _get_or_create_temp_dir()
 
-                try:
-                    result = _process_clip(
-                        video_path=st.session_state.video_path,
-                        start_sec=start_sec,
-                        end_sec=end_sec,
-                        clip_index=pos,
-                        episode_number=episode_number,
-                        transcription=st.session_state.transcription,
-                        temp_dir=temp_dir,
-                    )
-                    results.append(result)
-                except Exception as e:
-                    st.error(f"Error en clip {pos}: {e}")
-                    continue
+        # Guardar imagen de fondo en temp
+        suffix = ".jpg"
+        if podcast_slug == "ladrando-ideas" and st.session_state.bg_ladrando:
+            bg_path = _save_image_bytes(st.session_state.bg_ladrando, suffix)
+        else:
+            bg_path = _save_image_bytes(st.session_state.bg_ftbp, suffix)
 
-            progress.progress(100, text="¡Listo!")
-            progress.empty()
-            st.session_state.clips_ready = results
+        results   = []
+        progress  = st.progress(0)
+        clip_num  = 0
+
+        for pos, clip_info in enumerate(selected_clips, start=1):
+            pct = int((pos - 1) / len(selected_clips) * 100)
+            progress.progress(pct, text=f"Generando clip {pos}/{len(selected_clips)}...")
+
+            try:
+                start_sec = _hhmmss_to_seconds(clip_info["start"])
+                end_sec   = _hhmmss_to_seconds(clip_info["end"])
+            except ValueError as e:
+                st.error(f"Clip {pos}: {e}")
+                continue
+
+            if end_sec <= start_sec:
+                st.error(f"Clip {pos}: el fin debe ser posterior al inicio.")
+                continue
+
+            clip_num += 1
+            try:
+                result = _process_single_clip(
+                    audio_path=st.session_state.audio_path,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    background_image_path=bg_path,
+                    clip_index=clip_num,
+                    episode_number=episode_number,
+                    podcast_slug=podcast_slug,
+                    transcription=st.session_state.transcription,
+                    temp_dir=temp_dir,
+                )
+                results.append(result)
+            except Exception as e:
+                st.error(f"Error en clip {pos}: {e}")
+                continue
+
+        progress.progress(100, text="¡Listo!")
+        progress.empty()
+        st.session_state.clips_ready = results
 
 
 # ── Resultados ────────────────────────────────────────────────────────────────
 
 if st.session_state.clips_ready:
-    st.header("🎉 Clips generados")
+    st.header("🎉 Clips listos para Instagram")
     for i, result in enumerate(st.session_state.clips_ready, start=1):
         _render_clip_result(result, i)
 
-elif not st.session_state.video_path:
-    st.info("👆 Sube un video para comenzar.")
+elif not st.session_state.audio_path:
+    st.info("👆 Sube el audio del episodio para comenzar.")
+elif not bg_bytes:
+    st.info(f"👈 Sube la imagen de fondo para {podcast_display} en el sidebar.")

@@ -2,9 +2,10 @@
 transcriber.py — Transcripción de audio con OpenAI Whisper API.
 
 Responsabilidades:
-- Extraer audio del video (workaround para límite 25MB de Whisper API)
+- Re-encodar audio a 16kHz mono 32k (workaround para límite 25MB de Whisper API)
 - Transcribir en español con timestamps por palabra y por segmento
 - Formatear transcripción para prompts de Claude
+- Ajustar timestamps a límites naturales de palabras (snap_to_word_boundaries)
 """
 
 import os
@@ -24,15 +25,15 @@ from config import (
 )
 
 
-def extract_audio(video_path: str, audio_output_path: str) -> str:
+def extract_audio(audio_path: str, audio_output_path: str) -> str:
     """
-    Extrae el audio del video como MP3 mono 16kHz.
+    Re-encodea el audio a MP3 mono 16kHz 32kbps para la Whisper API.
 
-    Esto reduce el tamaño ~10x respecto al video original, resolviendo
-    el límite de 25MB de la Whisper API.
+    Un episodio de podcast típico (1h, 128kbps) pesa ~55MB.
+    Re-encodado a 16kHz mono 32k queda en ~7MB — bajo el límite de 25MB de Whisper.
 
     Args:
-        video_path:        ruta al video fuente
+        audio_path:        ruta al audio fuente (MP3, M4A, WAV, etc.)
         audio_output_path: ruta de destino para el MP3
 
     Returns:
@@ -41,8 +42,8 @@ def extract_audio(video_path: str, audio_output_path: str) -> str:
     cmd = [
         "ffmpeg",
         "-y",
-        "-i", video_path,
-        "-vn",                            # sin video
+        "-i", audio_path,
+        "-vn",                            # sin video (no-op si ya es audio)
         "-ar", str(AUDIO_SAMPLE_RATE),    # 16000 Hz
         "-ac", str(AUDIO_CHANNELS),       # mono
         "-b:a", AUDIO_BITRATE,            # 32k
@@ -58,18 +59,18 @@ def extract_audio(video_path: str, audio_output_path: str) -> str:
     return audio_output_path
 
 
-def transcribe(video_path: str, language: str = WHISPER_LANGUAGE) -> dict:
+def transcribe(audio_path: str, language: str = WHISPER_LANGUAGE) -> dict:
     """
-    Transcribe el audio del video usando la Whisper API de OpenAI.
+    Transcribe el audio usando la Whisper API de OpenAI.
 
     Flujo:
-        1. Extrae audio a MP3 temporal (evita límite 25MB)
+        1. Re-encodea audio a MP3 16kHz mono (evita límite 25MB)
         2. Envía a Whisper API con verbose_json y timestamps por palabra
         3. Retorna dict estructurado con texto, segmentos y palabras
         4. Limpia el archivo temporal de audio
 
     Args:
-        video_path: ruta al video (MOV o MP4)
+        audio_path: ruta al audio (MP3, M4A, WAV)
         language:   código de idioma ISO 639-1 (default: "es")
 
     Returns:
@@ -86,7 +87,7 @@ def transcribe(video_path: str, language: str = WHISPER_LANGUAGE) -> dict:
         tmp_audio_path = tmp.name
 
     try:
-        extract_audio(video_path, tmp_audio_path)
+        extract_audio(audio_path, tmp_audio_path)
 
         with open(tmp_audio_path, "rb") as audio_file:
             result = client.audio.transcriptions.create(
@@ -127,12 +128,46 @@ def transcribe(video_path: str, language: str = WHISPER_LANGUAGE) -> dict:
             os.unlink(tmp_audio_path)
 
 
-def transcribe_clip(clip_path: str, language: str = WHISPER_LANGUAGE) -> dict:
+def snap_to_word_boundaries(
+    start_sec: float,
+    end_sec: float,
+    words: list,
+    tolerance: float = 3.0,
+) -> tuple:
     """
-    Igual que transcribe() pero semánticamente para clips ya cortados.
-    Alias conveniente para usar en app.py después de process_video().
+    Ajusta start_sec y end_sec a los límites naturales de palabras más cercanos.
+
+    Garantiza que los clips no corten a mitad de palabra:
+    - start_sec → inicio de la palabra más cercana (dentro de ±tolerance segundos)
+    - end_sec   → fin de la palabra más cercana (dentro de ±tolerance segundos)
+
+    Args:
+        start_sec:  tiempo de inicio sugerido (segundos)
+        end_sec:    tiempo de fin sugerido (segundos)
+        words:      lista de words [{start, end, word}] del transcript completo
+        tolerance:  margen máximo de ajuste en segundos (default: 3.0)
+
+    Returns:
+        (snapped_start, snapped_end) — ambos ajustados a límites de palabras
     """
-    return transcribe(clip_path, language=language)
+    if not words:
+        return start_sec, end_sec
+
+    # Snap start → inicio de la palabra más cercana a start_sec
+    candidates_start = [w for w in words if abs(w["start"] - start_sec) <= tolerance]
+    if candidates_start:
+        snapped_start = min(candidates_start, key=lambda w: abs(w["start"] - start_sec))["start"]
+    else:
+        snapped_start = start_sec
+
+    # Snap end → fin de la palabra más cercana a end_sec
+    candidates_end = [w for w in words if abs(w["end"] - end_sec) <= tolerance]
+    if candidates_end:
+        snapped_end = min(candidates_end, key=lambda w: abs(w["end"] - end_sec))["end"]
+    else:
+        snapped_end = end_sec
+
+    return snapped_start, snapped_end
 
 
 def format_for_claude(transcription: dict, max_chars: int = 8000) -> str:
