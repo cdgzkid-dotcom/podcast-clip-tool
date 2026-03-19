@@ -9,26 +9,28 @@ Responsabilidades:
 
 import os
 
-def build_filename(clip_index: int, episode_number: int, podcast_slug: str) -> str:
+def build_filename(clip_index: int, season_number: int, episode_number: int, podcast_slug: str) -> str:
     """
     Construye el nombre base del clip (sin extensión).
 
-    Ejemplo: clip_01_ladrando-ideas_ep05
-             clip_01_ftbp_ep03
+    Ejemplo: clip_01_ladrando-ideas_t02_ep05
+             clip_01_ftbp_t01_ep03
 
     Args:
         clip_index:     índice del clip (1-based)
+        season_number:  número de temporada
         episode_number: número del episodio
         podcast_slug:   slug del podcast ("ladrando-ideas" | "ftbp")
 
     Returns:
         Nombre base sin extensión
     """
-    return f"clip_{clip_index:02d}_{podcast_slug}_ep{episode_number:02d}"
+    return f"clip_{clip_index:02d}_{podcast_slug}_t{season_number:02d}_ep{episode_number:02d}"
 
 
 def package_clip_output(
     clip_index: int,
+    season_number: int,
     episode_number: int,
     podcast_slug: str,
     video_path: str,
@@ -65,7 +67,7 @@ def package_clip_output(
     Raises:
         FileNotFoundError: si video_path o srt_path no existen
     """
-    filename_base = build_filename(clip_index, episode_number, podcast_slug)
+    filename_base = build_filename(clip_index, season_number, episode_number, podcast_slug)
 
     with open(video_path, "rb") as f:
         video_bytes = f.read()

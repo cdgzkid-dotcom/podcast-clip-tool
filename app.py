@@ -104,6 +104,7 @@ def _process_single_clip(
     end_sec: float,
     background_image_path: str,
     clip_index: int,
+    season_number: int,
     episode_number: int,
     podcast_slug: str,
     transcription: dict,
@@ -139,11 +140,14 @@ def _process_single_clip(
 
     # 4. Generar caption Instagram
     podcast_display = PODCASTS[podcast_slug]["display_name"]
-    instagram_caption = generate_instagram_caption(clip_text, episode_number, podcast_display)
+    instagram_caption = generate_instagram_caption(
+        clip_text, season_number, episode_number, podcast_display
+    )
 
     # 5. Empaquetar para descarga
     return package_clip_output(
         clip_index=clip_index,
+        season_number=season_number,
         episode_number=episode_number,
         podcast_slug=podcast_slug,
         video_path=final_video,
@@ -261,14 +265,23 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Número de episodio
-    episode_number = st.number_input(
-        "Número de episodio",
+    # Temporada y episodio
+    col_ep1, col_ep2 = st.columns(2)
+    season_number = col_ep1.number_input(
+        "Temporada",
+        min_value=1,
+        max_value=99,
+        value=st.session_state.get("season_number", 1),
+        step=1,
+    )
+    episode_number = col_ep2.number_input(
+        "Episodio",
         min_value=1,
         max_value=999,
         value=st.session_state.episode_number,
         step=1,
     )
+    st.session_state.season_number  = season_number
     st.session_state.episode_number = episode_number
 
     st.markdown("---")
@@ -427,6 +440,7 @@ if st.session_state.viral_moments:
                     end_sec=end_sec,
                     background_image_path=bg_path,
                     clip_index=clip_num,
+                    season_number=season_number,
                     episode_number=episode_number,
                     podcast_slug=podcast_slug,
                     transcription=st.session_state.transcription,

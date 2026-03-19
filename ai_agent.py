@@ -64,7 +64,7 @@ especializado en contenido de podcasts en español latinoamericano.
 Creas captions que maximizan el engagement y el crecimiento orgánico en Instagram."""
 
 _CAPTION_INSTAGRAM_TEMPLATE = """Crea un caption para Instagram Reels para este clip del
-episodio {episode_number} del podcast "{podcast_name}".
+podcast "{podcast_name}" — Temporada {season_number}, Episodio {episode_number}.
 
 TRANSCRIPT DEL CLIP:
 {clip_transcript}
@@ -74,6 +74,7 @@ REQUISITOS DEL CAPTION:
 - Cuerpo: 2-4 oraciones que expanden la idea del clip
 - Incluye la reflexión o aprendizaje clave
 - Call-to-action: pregunta que invite a comentar o guardar
+- Menciona la temporada y episodio de forma natural en el cuerpo (ej: "en el ep. {episode_number} de la temp. {season_number}")
 - Hashtags: 8-12 hashtags, mezcla de nicho + generales en español e inglés
 - Separa el cuerpo de los hashtags con una línea en blanco
 - Tono reflexivo pero accesible, conversacional
@@ -165,6 +166,7 @@ def detect_viral_moments(
 
 def generate_instagram_caption(
     clip_transcript: str,
+    season_number: int,
     episode_number: int,
     podcast_name: str,
 ) -> str:
@@ -182,6 +184,7 @@ def generate_instagram_caption(
     client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
 
     user_message = _CAPTION_INSTAGRAM_TEMPLATE.format(
+        season_number=season_number,
         episode_number=episode_number,
         podcast_name=podcast_name,
         clip_transcript=clip_transcript,
