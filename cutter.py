@@ -118,11 +118,13 @@ def create_video_from_audio(
     Raises:
         RuntimeError: si ffmpeg falla
     """
-    # Escalar para llenar 1080×1920 (crop si aspect ratio difiere)
+    # Escalar para que quepa completa dentro de 1080×1920, sin recortar.
+    # Si la imagen no es exactamente 9:16, se agregan barras negras (arriba/abajo
+    # o lados) para completar el frame — nunca se corta contenido de la imagen.
     scale_filter = (
         f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
-        f"force_original_aspect_ratio=increase,"
-        f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}"
+        f"force_original_aspect_ratio=decrease,"
+        f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black"
     )
 
     cmd = [

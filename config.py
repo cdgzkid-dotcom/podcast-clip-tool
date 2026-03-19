@@ -59,7 +59,7 @@ SUBTITLE_FONT_NAME = "Roboto"    # Google Fonts — instalado via packages.txt
 SUBTITLE_FONT_SIZE = 88          # pt — grande y legible en mobile
 SUBTITLE_FONT_COLOR = "&H00FFFFFF"     # Blanco (ASS: AABBGGRR)
 SUBTITLE_OUTLINE_COLOR = "&H00000000" # Negro
-SUBTITLE_OUTLINE_WIDTH = 5       # px — outline más grueso para mejor legibilidad
+SUBTITLE_OUTLINE_WIDTH = 6       # px — outline grueso, sin shadow para máxima nitidez
 SUBTITLE_BOLD = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom (estándar ASS)
 SUBTITLE_MARGIN_V = 80           # margen vertical desde el borde inferior
