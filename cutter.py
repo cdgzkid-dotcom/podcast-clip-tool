@@ -21,12 +21,48 @@ from config import (
 )
 
 
+def normalize_audio(input_path: str, output_path: str) -> str:
+    """
+    Normaliza el volumen del episodio completo antes de transcribir y cortar.
+
+    dynaudnorm detecta frame a frame quién habla más callado y le sube la
+    ganancia sin tocar al locutor que ya suena bien. loudnorm lleva el nivel
+    final a -16 LUFS (estándar Instagram/podcasts).
+
+    Args:
+        input_path:  audio original del episodio (MP3, M4A, WAV)
+        output_path: audio normalizado de destino (MP3)
+
+    Returns:
+        output_path si éxito
+
+    Raises:
+        RuntimeError: si ffmpeg falla
+    """
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", input_path,
+        "-af", AUDIO_NORMALIZE_FILTER,
+        "-c:a", AUDIO_CODEC,
+        "-b:a", "192k",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg falló al normalizar el audio.\n"
+            f"Error: {result.stderr}"
+        )
+    return output_path
+
+
 def cut_audio(input_path: str, start_sec: float, end_sec: float, output_path: str) -> str:
     """
     Corta un segmento de audio entre start_sec y end_sec.
 
     Args:
-        input_path:  ruta al audio original (MP3, M4A, WAV)
+        input_path:  ruta al audio normalizado del episodio (MP3)
         start_sec:   tiempo de inicio en segundos
         end_sec:     tiempo de fin en segundos
         output_path: ruta de destino del clip (MP3)
@@ -43,7 +79,6 @@ def cut_audio(input_path: str, start_sec: float, end_sec: float, output_path: st
         "-ss", str(start_sec),
         "-to", str(end_sec),
         "-i", input_path,
-        "-af", AUDIO_NORMALIZE_FILTER,  # iguala volumen entre locutores
         "-c:a", AUDIO_CODEC,
         "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",

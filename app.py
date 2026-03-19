@@ -31,7 +31,7 @@ from config import (
     SUPPORTED_AUDIO_FORMATS,
     WHISPER_LANGUAGE,
 )
-from cutter import process_clip
+from cutter import normalize_audio, process_clip
 from transcriber import transcribe, format_for_claude, get_words_in_range, get_text_in_range, snap_to_word_boundaries
 from subtitles import generate_word_ass, words_to_srt, burn_subtitles
 from ai_agent import detect_viral_moments, generate_instagram_caption
@@ -313,7 +313,17 @@ uploaded_audio = st.file_uploader(
 if uploaded_audio:
     if st.session_state.audio_filename != uploaded_audio.name:
         st.session_state.audio_filename  = uploaded_audio.name
-        st.session_state.audio_path      = _save_upload(uploaded_audio, prefix="episode")
+        raw_path = _save_upload(uploaded_audio, prefix="episode_raw")
+        # Normalizar volumen del episodio completo antes de transcribir/cortar
+        temp_dir = _get_or_create_temp_dir()
+        normalized_path = os.path.join(temp_dir, "episode_normalized.mp3")
+        with st.spinner("🔊 Normalizando volumen del episodio..."):
+            try:
+                normalize_audio(raw_path, normalized_path)
+                st.session_state.audio_path = normalized_path
+            except Exception as e:
+                st.warning(f"Normalización falló, se usará el audio original: {e}")
+                st.session_state.audio_path = raw_path
         # Reset estado derivado al cambiar el audio
         st.session_state.transcription   = None
         st.session_state.viral_moments   = None
