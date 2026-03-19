@@ -6,10 +6,13 @@ Responsabilidades:
 - Generar captions optimizados para TikTok e Instagram en español
 """
 
+import io
 import json
 import re
+import urllib.request
 
 import anthropic
+import openai
 
 from config import CLAUDE_MODEL, CLIP_DURATION_SECONDS, CLIP_DURATION_TOLERANCE, get_secret
 
@@ -265,6 +268,121 @@ Responde ÚNICAMENTE con JSON válido, sin markdown:
         return {"title": data.get("title", ""), "description": data.get("description", "")}
     except json.JSONDecodeError:
         return {"title": episode_title, "description": response.content[0].text.strip()}
+
+
+_LINKEDIN_SYSTEM_PROMPT = """Eres el ghostwriter de JC Rico, co-host del podcast
+"Fuck The Business Plan". Escribes sus posts de LinkedIn en primera persona.
+
+Su voz: reflexiva, directa, con experiencia real de negocios. Usa párrafos cortos.
+Nada de frases vacías tipo "¡Imperdible!" o "¡No te lo pierdas!". Cero clichés
+motivacionales. El tono es el de un líder de ventas con 53+ proyectos globales
+que comparte lo que aprendió, no que vende humo.
+
+Perfil: Líder de Ventas Fraccional | Revenue Ops y Prop-Tech | Mentor Internacional."""
+
+_LINKEDIN_USER_TEMPLATE = """Acabo de grabar el episodio {season_number}x{episode_number}
+del podcast "Fuck The Business Plan". Léete la transcripción completa y escribe
+el post de LinkedIn para que yo (JC Rico) lo publique junto con el clip del episodio.
+
+ESTRUCTURA OBLIGATORIA (sigue este orden exacto):
+1. Abre con UNA frase-gancho que sea una cita memorable o idea fuerte del episodio
+   (entre comillas si es cita textual, sin comillas si es paráfrasis)
+2. Presentación del invitado: quién es, qué hace, por qué importa (2-3 oraciones)
+3. Historia o contexto que haga al lector conectar (3-5 oraciones, personal, específico)
+4. Dos aprendizajes clave numerados (1- y 2-), concisos y accionables
+5. Cierre: una oración invitando a escuchar el episodio completo
+6. Pregunta de cierre para generar comentarios (genuina, relacionada al tema)
+
+RESTRICCIONES:
+- Máximo 1,300 caracteres en total (límite de LinkedIn antes del "ver más")
+- Sin hashtags
+- Sin emojis excesivos (máximo 1-2 si son realmente útiles)
+- Todo en español
+- Primera persona como JC Rico
+
+ADEMÁS, al final del post (separado con ---) escribe en inglés un prompt detallado
+para DALL-E 3 que genere una imagen profesional para acompañar este post.
+La imagen debe: representar el tema central del episodio, ser horizontal (16:9),
+sin texto ni letras, estilo fotorrealista o ilustración editorial de negocios.
+
+TRANSCRIPT COMPLETO:
+{transcript}
+
+Responde ÚNICAMENTE con JSON válido, sin markdown:
+{{
+  "copy": "El post de LinkedIn aquí...",
+  "image_prompt": "Prompt en inglés para DALL-E 3..."
+}}"""
+
+
+def generate_linkedin_post(
+    transcript_text: str,
+    season_number: int,
+    episode_number: int,
+) -> dict:
+    """
+    Genera copy de LinkedIn + prompt para imagen a partir del transcript completo.
+
+    Solo aplica para FTBP (JC Rico). Usa el transcript completo del episodio.
+
+    Returns:
+        {"copy": str, "image_prompt": str}
+    """
+    client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
+
+    user_message = _LINKEDIN_USER_TEMPLATE.format(
+        season_number=season_number,
+        episode_number=episode_number,
+        transcript=transcript_text[:120_000],
+    )
+
+    try:
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=2048,
+            system=_LINKEDIN_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+        )
+    except anthropic.APIError as e:
+        raise RuntimeError(f"Error al llamar a la Claude API: {e}") from e
+
+    raw = _extract_json_block(response.content[0].text.strip())
+    try:
+        data = json.loads(raw)
+        return {
+            "copy":         data.get("copy", ""),
+            "image_prompt": data.get("image_prompt", ""),
+        }
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Claude retornó JSON inválido: {e}\nRespuesta:\n{raw}") from e
+
+
+def generate_linkedin_image(image_prompt: str) -> bytes:
+    """
+    Genera una imagen para el post de LinkedIn usando DALL-E 3.
+
+    Args:
+        image_prompt: descripción en inglés generada por Claude
+
+    Returns:
+        bytes de la imagen PNG/JPEG lista para descargar
+    """
+    client = openai.OpenAI(api_key=get_secret("OPENAI_API_KEY"))
+
+    try:
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=image_prompt,
+            size="1792x1024",
+            quality="standard",
+            n=1,
+        )
+    except openai.OpenAIError as e:
+        raise RuntimeError(f"Error al generar imagen con DALL-E 3: {e}") from e
+
+    image_url = response.data[0].url
+    with urllib.request.urlopen(image_url) as r:
+        return r.read()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

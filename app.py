@@ -36,7 +36,13 @@ from config import (
 from cutter import normalize_audio, process_clip
 from transcriber import transcribe, format_for_claude, get_words_in_range, get_text_in_range, snap_to_word_boundaries
 from subtitles import generate_word_ass, words_to_srt
-from ai_agent import detect_viral_moments, generate_instagram_caption, generate_episode_description
+from ai_agent import (
+    detect_viral_moments,
+    generate_instagram_caption,
+    generate_episode_description,
+    generate_linkedin_post,
+    generate_linkedin_image,
+)
 from exporter import package_clip_output
 
 
@@ -214,6 +220,8 @@ for key, default in {
     "bg_ladrando":          None,
     "bg_ftbp":              None,
     "episode_description":  None,
+    "linkedin_content":     None,
+    "linkedin_image_bytes": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -504,6 +512,61 @@ if st.session_state.transcription:
         d = st.session_state.episode_description
         st.text_input("Título sugerido", value=d["title"], key="spotify_title_out")
         st.text_area("Descripción para Spotify", value=d["description"], height=160, key="spotify_desc_output")
+
+    # ── LinkedIn (solo FTBP) ──────────────────────────────────────────────────
+    if podcast_slug == "ftbp":
+        st.divider()
+        st.subheader("💼 Post de LinkedIn (FTBP)")
+        st.caption("Generado desde el transcript completo del episodio, en la voz de JC Rico.")
+
+        if st.button("🔗 Generar post de LinkedIn + imagen", key="btn_linkedin", type="secondary"):
+            transcript_text_full = st.session_state.transcription.get("text", "")
+            with st.spinner("Escribiendo post con Claude..."):
+                try:
+                    linkedin_content = generate_linkedin_post(
+                        transcript_text=transcript_text_full,
+                        season_number=season_number,
+                        episode_number=episode_number,
+                    )
+                    st.session_state.linkedin_content     = linkedin_content
+                    st.session_state.linkedin_image_bytes = None  # reset imagen anterior
+                except Exception as e:
+                    st.error(f"Error al generar post de LinkedIn: {e}")
+
+        if st.session_state.linkedin_content:
+            lc = st.session_state.linkedin_content
+            st.text_area(
+                "Copy para LinkedIn",
+                value=lc["copy"],
+                height=280,
+                key="linkedin_copy_out",
+            )
+            col_li1, col_li2 = st.columns(2)
+            col_li1.download_button(
+                label="⬇️ Descargar copy (.txt)",
+                data=lc["copy"],
+                file_name=f"linkedin_s{season_number:02d}e{episode_number:02d}.txt",
+                mime="text/plain",
+                key="dl_linkedin_copy",
+            )
+
+            if col_li2.button("🖼️ Generar imagen para el post", key="btn_li_image"):
+                with st.spinner("Generando imagen con DALL-E 3..."):
+                    try:
+                        img_bytes = generate_linkedin_image(lc["image_prompt"])
+                        st.session_state.linkedin_image_bytes = img_bytes
+                    except Exception as e:
+                        st.error(f"Error al generar imagen: {e}")
+
+            if st.session_state.linkedin_image_bytes:
+                st.image(st.session_state.linkedin_image_bytes, use_container_width=True)
+                st.download_button(
+                    label="⬇️ Descargar imagen LinkedIn (PNG)",
+                    data=st.session_state.linkedin_image_bytes,
+                    file_name=f"linkedin_img_s{season_number:02d}e{episode_number:02d}.png",
+                    mime="image/png",
+                    key="dl_linkedin_img",
+                )
 
 
 # ── Mostrar momentos y generar clips ─────────────────────────────────────────
