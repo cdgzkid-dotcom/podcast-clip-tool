@@ -13,6 +13,7 @@ Flujo:
 """
 
 import os
+import pathlib
 import tempfile
 import atexit
 import shutil
@@ -215,15 +216,14 @@ for key, default in {
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Directorio assets/ relativo al archivo app.py — persiste entre sesiones
-# mientras no haya un nuevo deploy (más confiable que /tmp en Streamlit Cloud).
-_APP_DIR    = os.path.dirname(os.path.abspath(__file__))
-_ASSETS_DIR = os.path.join(_APP_DIR, "assets")
-os.makedirs(_ASSETS_DIR, exist_ok=True)
+# Directorio en home del usuario — sobrevive redeployments de Streamlit Cloud
+# (a diferencia de assets/ en el directorio del proyecto que se resetea en cada push).
+_PERSISTENT_DIR = pathlib.Path.home() / ".podcast_clip_bg"
+_PERSISTENT_DIR.mkdir(exist_ok=True)
 
 _BG_PATHS = {
-    "ladrando-ideas": os.path.join(_ASSETS_DIR, "bg_ladrando.jpg"),
-    "ftbp":           os.path.join(_ASSETS_DIR, "bg_ftbp.jpg"),
+    "ladrando-ideas": str(_PERSISTENT_DIR / "bg_ladrando.jpg"),
+    "ftbp":           str(_PERSISTENT_DIR / "bg_ftbp.jpg"),
 }
 
 def _load_bg(slug: str, state_key: str) -> None:
@@ -236,12 +236,9 @@ def _load_bg(slug: str, state_key: str) -> None:
             st.session_state[state_key] = f.read()
 
 def _save_bg(slug: str, data: bytes) -> None:
-    """Guarda imagen en assets/ para persistir entre sesiones."""
-    try:
-        with open(_BG_PATHS[slug], "wb") as f:
-            f.write(data)
-    except Exception:
-        pass  # Si falla no es crítico, ya está en session state
+    """Guarda imagen en ~/.podcast_clip_bg/ para persistir entre sesiones."""
+    with open(_BG_PATHS[slug], "wb") as f:
+        f.write(data)
 
 _load_bg("ladrando-ideas", "bg_ladrando")
 _load_bg("ftbp", "bg_ftbp")
