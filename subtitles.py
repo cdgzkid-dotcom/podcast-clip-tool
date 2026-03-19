@@ -29,8 +29,8 @@ from config import (
     VIDEO_PRESET,
 )
 
-# Color amarillo para relleno karaoke (ASS: AABBGGRR)
-_KARAOKE_FILL_COLOR = "&H0000FFFF"
+# Transparente — palabras arrancan invisibles y aparecen blancas al llegar su tiempo
+_KARAOKE_FILL_COLOR = "&HFFFFFFFF"
 
 # ── Plantilla ASS ─────────────────────────────────────────────────────────────
 # PlayResX/Y = resolución de referencia para el posicionado de subtítulos.
@@ -136,7 +136,7 @@ def generate_word_ass(words: list, output_path: str) -> str:
             )
             cs = max(1, int(duration_sec * 100))
             text = w["word"].lower().replace("{", "\\{").replace("}", "\\}")
-            parts.append(f"{{\\kf{cs}}}{text}")
+            parts.append(f"{{\\k{cs}}}{text}")
 
         events.append(_ASS_DIALOGUE.format(
             start=line_start,

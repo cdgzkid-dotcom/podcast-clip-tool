@@ -449,31 +449,31 @@ if st.session_state.transcription:
         )
 
     # Generador de descripción para Spotify
-    with st.expander("🎧 Generar título y descripción para Spotify", expanded=False):
-        episode_title_input = st.text_input(
-            "Título del episodio (puedes dejar tu propuesta o dejarlo vacío)",
-            placeholder="Ej: Cómo fracasar bien y aprender de ello",
-            key="episode_title_input",
-        )
-        if st.button("✍️ Generar descripción", key="btn_spotify_desc"):
-            transcript_text_full = format_for_claude(st.session_state.transcription)
-            with st.spinner("Generando descripción con Claude..."):
-                try:
-                    result = generate_episode_description(
-                        transcript_text=transcript_text_full,
-                        episode_title=episode_title_input or "Sin título",
-                        podcast_name=podcast_display,
-                        season_number=season_number,
-                        episode_number=episode_number,
-                    )
-                    st.session_state.episode_description = result
-                except Exception as e:
-                    st.error(f"Error al generar descripción: {e}")
+    st.subheader("🎧 Título y descripción para Spotify")
+    episode_title_input = st.text_input(
+        "Título del episodio",
+        placeholder="Ej: Cómo fracasar bien y aprender de ello",
+        key="episode_title_input",
+    )
+    if st.button("✍️ Generar título y descripción", key="btn_spotify_desc", type="secondary"):
+        transcript_text_full = format_for_claude(st.session_state.transcription)
+        with st.spinner("Generando con Claude..."):
+            try:
+                result = generate_episode_description(
+                    transcript_text=transcript_text_full,
+                    episode_title=episode_title_input or "Sin título",
+                    podcast_name=podcast_display,
+                    season_number=season_number,
+                    episode_number=episode_number,
+                )
+                st.session_state.episode_description = result
+            except Exception as e:
+                st.error(f"Error al generar descripción: {e}")
 
-        if st.session_state.episode_description:
-            d = st.session_state.episode_description
-            st.markdown(f"**Título:** {d['title']}")
-            st.text_area("Descripción para Spotify", value=d["description"], height=180, key="spotify_desc_output")
+    if st.session_state.episode_description:
+        d = st.session_state.episode_description
+        st.text_input("Título sugerido", value=d["title"], key="spotify_title_out")
+        st.text_area("Descripción para Spotify", value=d["description"], height=160, key="spotify_desc_output")
 
 
 # ── Mostrar momentos y generar clips ─────────────────────────────────────────
@@ -544,6 +544,10 @@ if st.session_state.viral_moments:
             if end_sec <= start_sec:
                 st.error(f"Clip {pos}: el fin debe ser posterior al inicio.")
                 continue
+
+            # Hard cap de seguridad en generación — nunca más de 65s
+            if end_sec - start_sec > CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE:
+                end_sec = start_sec + CLIP_DURATION_SECONDS
 
             clip_num += 1
             try:
