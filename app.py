@@ -24,10 +24,6 @@ from config import (
     APP_TITLE,
     CLIP_DURATION_SECONDS,
     CLIP_DURATION_TOLERANCE,
-    LINKEDIN_WIDTH,
-    LINKEDIN_HEIGHT,
-    SUBTITLE_LINKEDIN_FONT_SIZE,
-    SUBTITLE_LINKEDIN_MARGIN_V,
     MAX_UPLOAD_MB,
     MAX_VIRAL_MOMENTS,
     OUTPUT_SUBTITLE_EXT,
@@ -37,6 +33,12 @@ from config import (
     SUPPORTED_AUDIO_FORMATS,
     WHISPER_LANGUAGE,
 )
+
+# Formato LinkedIn — definidos aquí para no depender de versión de config.py
+LINKEDIN_WIDTH            = 1080
+LINKEDIN_HEIGHT           = 1080
+SUBTITLE_LINKEDIN_FONT_SIZE = 72
+SUBTITLE_LINKEDIN_MARGIN_V  = 120
 from cutter import normalize_audio, cut_audio, create_video_from_audio
 from transcriber import transcribe, format_for_claude, get_words_in_range, get_text_in_range, snap_to_word_boundaries
 from subtitles import generate_word_ass, words_to_srt
