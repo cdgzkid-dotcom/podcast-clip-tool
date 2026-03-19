@@ -41,7 +41,6 @@ from ai_agent import (
     generate_instagram_caption,
     generate_episode_description,
     generate_linkedin_post,
-    generate_linkedin_image,
 )
 from exporter import package_clip_output
 
@@ -221,7 +220,6 @@ for key, default in {
     "bg_ftbp":              None,
     "episode_description":  None,
     "linkedin_content":     None,
-    "linkedin_image_bytes": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -528,8 +526,7 @@ if st.session_state.transcription:
                         season_number=season_number,
                         episode_number=episode_number,
                     )
-                    st.session_state.linkedin_content     = linkedin_content
-                    st.session_state.linkedin_image_bytes = None  # reset imagen anterior
+                    st.session_state.linkedin_content = linkedin_content
                 except Exception as e:
                     st.error(f"Error al generar post de LinkedIn: {e}")
 
@@ -541,8 +538,7 @@ if st.session_state.transcription:
                 height=280,
                 key="linkedin_copy_out",
             )
-            col_li1, col_li2 = st.columns(2)
-            col_li1.download_button(
+            st.download_button(
                 label="⬇️ Descargar copy (.txt)",
                 data=lc["copy"],
                 file_name=f"linkedin_s{season_number:02d}e{episode_number:02d}.txt",
@@ -550,21 +546,17 @@ if st.session_state.transcription:
                 key="dl_linkedin_copy",
             )
 
-            if col_li2.button("🖼️ Generar imagen para el post", key="btn_li_image"):
-                with st.spinner("Generando imagen con DALL-E 3..."):
-                    try:
-                        img_bytes = generate_linkedin_image(lc["image_prompt"])
-                        st.session_state.linkedin_image_bytes = img_bytes
-                    except Exception as e:
-                        st.error(f"Error al generar imagen: {e}")
-
-            if st.session_state.linkedin_image_bytes:
-                st.image(st.session_state.linkedin_image_bytes, use_container_width=True)
+            # Imagen = portada del podcast (ya subida en sidebar)
+            if st.session_state.bg_ftbp:
+                st.caption("🖼️ Imagen para el post:")
+                img_col, _ = st.columns([1, 2])
+                with img_col:
+                    st.image(st.session_state.bg_ftbp, use_container_width=True)
                 st.download_button(
-                    label="⬇️ Descargar imagen LinkedIn (PNG)",
-                    data=st.session_state.linkedin_image_bytes,
-                    file_name=f"linkedin_img_s{season_number:02d}e{episode_number:02d}.png",
-                    mime="image/png",
+                    label="⬇️ Descargar imagen (portada FTBP)",
+                    data=st.session_state.bg_ftbp,
+                    file_name=f"linkedin_img_s{season_number:02d}e{episode_number:02d}.jpg",
+                    mime="image/jpeg",
                     key="dl_linkedin_img",
                 )
 

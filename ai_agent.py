@@ -6,13 +6,10 @@ Responsabilidades:
 - Generar captions optimizados para TikTok e Instagram en español
 """
 
-import io
 import json
 import re
-import urllib.request
 
 import anthropic
-import openai
 
 from config import CLAUDE_MODEL, CLIP_DURATION_SECONDS, CLIP_DURATION_TOLERANCE, get_secret
 
@@ -300,18 +297,12 @@ RESTRICCIONES:
 - Todo en español
 - Primera persona como JC Rico
 
-ADEMÁS, al final del post (separado con ---) escribe en inglés un prompt detallado
-para DALL-E 3 que genere una imagen profesional para acompañar este post.
-La imagen debe: representar el tema central del episodio, ser horizontal (16:9),
-sin texto ni letras, estilo fotorrealista o ilustración editorial de negocios.
-
 TRANSCRIPT COMPLETO:
 {transcript}
 
 Responde ÚNICAMENTE con JSON válido, sin markdown:
 {{
-  "copy": "El post de LinkedIn aquí...",
-  "image_prompt": "Prompt en inglés para DALL-E 3..."
+  "copy": "El post de LinkedIn aquí..."
 }}"""
 
 
@@ -349,10 +340,7 @@ def generate_linkedin_post(
     raw = _extract_json_block(response.content[0].text.strip())
     try:
         data = json.loads(raw)
-        return {
-            "copy":         data.get("copy", ""),
-            "image_prompt": data.get("image_prompt", ""),
-        }
+        return {"copy": data.get("copy", "")}
     except json.JSONDecodeError as e:
         raise ValueError(f"Claude retornó JSON inválido: {e}\nRespuesta:\n{raw}") from e
 
