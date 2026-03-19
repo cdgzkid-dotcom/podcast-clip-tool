@@ -222,24 +222,29 @@ def generate_episode_description(
     client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
 
     prompt = f"""Eres el productor del podcast "{podcast_name}".
-Con base en la transcripción completa del episodio, genera:
-1. Un título atractivo para el episodio (si el usuario ya propuso uno, mejóralo o úsalo tal cual)
-2. Una descripción para Spotify
+Leíste la transcripción completa del episodio y ahora tienes que escribir
+el título y la descripción que aparecerá en Spotify.
 
 TÍTULO PROPUESTO POR EL HOST: {episode_title}
 TEMPORADA: {season_number} | EPISODIO: {episode_number}
 
+REQUISITOS DEL TÍTULO:
+- Si el propuesto ya es bueno, úsalo tal cual o mejóralo mínimamente
+- Que sea directo y represente lo que realmente se habló
+
 REQUISITOS DE LA DESCRIPCIÓN:
-- 3 a 5 oraciones, tono natural y conversacional
-- Resume los temas principales que se discutieron
-- No seas dramático ni uses frases de hype como "¡Imprescindible!" o "¡No te lo pierdas!"
-- Menciona los temas concretos que se trataron
-- Termina con una oración que invite a escuchar sin ser cursi
+- Entre 120 y 200 palabras — suficiente para que el oyente sepa qué va a escuchar
+- Menciona de 4 a 6 temas o momentos específicos que SÍ ocurrieron en el episodio
+  (usa el transcript, no inventes nada)
+- Tono conversacional, como hablan los hosts, no corporativo ni dramático
+- Sin frases de hype: nada de "¡No te lo pierdas!", "Imprescindible", "Épico", etc.
+- Puedes estructurarlo en 2 párrafos cortos si ayuda a la lectura
+- Termina mencionando dónde escucharlo o con una invitación natural, no cursi
 
-TRANSCRIPT COMPLETO:
-{transcript_text[:80000]}
+TRANSCRIPT COMPLETO DEL EPISODIO:
+{transcript_text[:120000]}
 
-Responde ÚNICAMENTE con JSON válido:
+Responde ÚNICAMENTE con JSON válido, sin markdown:
 {{
   "title": "Título del episodio",
   "description": "Descripción para Spotify..."
@@ -248,7 +253,7 @@ Responde ÚNICAMENTE con JSON válido:
     try:
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=1024,
+            max_tokens=2048,
             messages=[{"role": "user", "content": prompt}],
         )
     except anthropic.APIError as e:

@@ -479,7 +479,8 @@ if st.session_state.transcription:
         key="episode_title_input",
     )
     if st.button("✍️ Generar título y descripción", key="btn_spotify_desc", type="secondary"):
-        transcript_text_full = format_for_claude(st.session_state.transcription)
+        # Texto plano del transcript — más compacto que el formateado con timestamps
+        transcript_text_full = st.session_state.transcription.get("text", "")
         with st.spinner("Generando con Claude..."):
             try:
                 result = generate_episode_description(
