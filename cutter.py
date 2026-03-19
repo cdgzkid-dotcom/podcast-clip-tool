@@ -12,6 +12,7 @@ import tempfile
 
 from config import (
     AUDIO_CODEC,
+    AUDIO_NORMALIZE_FILTER,
     TARGET_HEIGHT,
     TARGET_WIDTH,
     VIDEO_CODEC,
@@ -42,6 +43,7 @@ def cut_audio(input_path: str, start_sec: float, end_sec: float, output_path: st
         "-ss", str(start_sec),
         "-to", str(end_sec),
         "-i", input_path,
+        "-af", AUDIO_NORMALIZE_FILTER,  # iguala volumen entre locutores
         "-c:a", AUDIO_CODEC,
         "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",

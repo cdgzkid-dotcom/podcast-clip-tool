@@ -74,6 +74,14 @@ AUDIO_CODEC = "aac"
 VIDEO_CRF = 18                   # calidad de compresión (menor = mejor calidad)
 VIDEO_PRESET = "fast"            # velocidad de encoding en Streamlit Cloud
 
+# ── Normalización de audio ───────────────────────────────────────────────────
+# dynaudnorm: iguala volúmenes entre locutor callado y locutor normal (por frame)
+#   f=300  → ventana de 300ms para detectar cambios de volumen (suaviza sin cortar sílabas)
+#   g=5    → suavizado gaussiano — evita saltos bruscos de ganancia
+#   m=10   → ganancia mínima ×10 (evita amplificar el silencio de fondo)
+# loudnorm: lleva el nivel final a estándar de redes sociales (-16 LUFS)
+AUDIO_NORMALIZE_FILTER = "dynaudnorm=f=300:g=5:m=10,loudnorm=I=-16:TP=-1.5:LRA=11"
+
 # ── Audio para Whisper ───────────────────────────────────────────────────────
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHANNELS = 1
