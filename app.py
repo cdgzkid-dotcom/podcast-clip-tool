@@ -188,9 +188,16 @@ def _process_single_clip(
         instagram_caption=instagram_caption,
     )
 
-    # 8. Agregar assets de LinkedIn al resultado
+    # 8. Leer LinkedIn video a memoria y borrar del disco inmediatamente
     with open(video_li, "rb") as f:
         result["linkedin_video_bytes"] = f.read()
+    os.unlink(video_li)
+
+    # 9. Limpiar archivos ASS del disco
+    for p in [ass_ig_path, ass_li_path]:
+        if p and os.path.exists(p):
+            os.unlink(p)
+
     result["linkedin_caption"] = linkedin_caption
     result["linkedin_filename"] = f"{result['filename_base']}_linkedin.mp4"
 

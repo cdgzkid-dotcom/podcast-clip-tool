@@ -69,11 +69,14 @@ def package_clip_output(
     """
     filename_base = build_filename(clip_index, season_number, episode_number, podcast_slug)
 
+    # Leer a memoria y borrar del disco inmediatamente — evita acumulación en disco
     with open(video_path, "rb") as f:
         video_bytes = f.read()
+    os.unlink(video_path)
 
     with open(srt_path, "rb") as f:
         srt_bytes = f.read()
+    os.unlink(srt_path)
 
     return {
         "filename_base":     filename_base,
