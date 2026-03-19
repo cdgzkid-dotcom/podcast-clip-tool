@@ -227,9 +227,9 @@ _BG_PATHS = {
     "ladrando-ideas": str(_PERSISTENT_DIR / "bg_ladrando.jpg"),
     "ftbp":           str(_PERSISTENT_DIR / "bg_ftbp.jpg"),
 }
+_EP_STATE_PATH = str(_PERSISTENT_DIR / "episode_state.json")
 
 def _load_bg(slug: str, state_key: str) -> None:
-    """Carga imagen desde assets/ si session state está vacío."""
     if st.session_state[state_key] is not None:
         return
     path = _BG_PATHS[slug]
@@ -238,12 +238,34 @@ def _load_bg(slug: str, state_key: str) -> None:
             st.session_state[state_key] = f.read()
 
 def _save_bg(slug: str, data: bytes) -> None:
-    """Guarda imagen en ~/.podcast_clip_bg/ para persistir entre sesiones."""
     with open(_BG_PATHS[slug], "wb") as f:
         f.write(data)
 
+def _load_episode_state() -> None:
+    """Carga temporada y episodio guardados de la sesión anterior."""
+    if os.path.exists(_EP_STATE_PATH):
+        try:
+            import json as _json
+            with open(_EP_STATE_PATH) as f:
+                saved = _json.load(f)
+            if st.session_state.season_number == 1:
+                st.session_state.season_number = saved.get("season", 1)
+            if st.session_state.episode_number == 1:
+                st.session_state.episode_number = saved.get("episode", 1)
+        except Exception:
+            pass
+
+def _save_episode_state(season: int, episode: int) -> None:
+    try:
+        import json as _json
+        with open(_EP_STATE_PATH, "w") as f:
+            _json.dump({"season": season, "episode": episode}, f)
+    except Exception:
+        pass
+
 _load_bg("ladrando-ideas", "bg_ladrando")
 _load_bg("ftbp", "bg_ftbp")
+_load_episode_state()
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -317,6 +339,7 @@ with st.sidebar:
     )
     st.session_state.season_number  = season_number
     st.session_state.episode_number = episode_number
+    _save_episode_state(season_number, episode_number)
 
     st.markdown("---")
     st.caption(
