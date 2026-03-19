@@ -240,7 +240,7 @@ with st.sidebar:
             label_visibility="collapsed",
         )
         if img_ladrando:
-            st.session_state.bg_ladrando = img_ladrando.read()
+            st.session_state.bg_ladrando = img_ladrando.getvalue()
             st.image(st.session_state.bg_ladrando, use_container_width=True)
         elif st.session_state.bg_ladrando:
             st.image(st.session_state.bg_ladrando, use_container_width=True)
@@ -254,7 +254,7 @@ with st.sidebar:
             label_visibility="collapsed",
         )
         if img_ftbp:
-            st.session_state.bg_ftbp = img_ftbp.read()
+            st.session_state.bg_ftbp = img_ftbp.getvalue()
             st.image(st.session_state.bg_ftbp, use_container_width=True)
         elif st.session_state.bg_ftbp:
             st.image(st.session_state.bg_ftbp, use_container_width=True)
