@@ -12,11 +12,13 @@ Flujo:
   8. Descargar MP4 + SRT
 """
 
+import json
 import os
 import pathlib
 import tempfile
 import atexit
 import shutil
+from datetime import date
 
 import streamlit as st
 
@@ -47,6 +49,7 @@ from ai_agent import (
     generate_instagram_caption,
     generate_episode_description,
     generate_linkedin_clip_copy,
+    generate_podcast_script,
 )
 from exporter import package_clip_output
 
@@ -344,6 +347,117 @@ def _get_episode_defaults(slug: str) -> tuple:
 _load_bg("ladrando-ideas", "bg_ladrando")
 _load_bg("ftbp", "bg_ftbp")
 
+# ── Archivo de episodios ──────────────────────────────────────────────────────
+
+_ARCHIVE_PATH = str(_PERSISTENT_DIR / "episode_archive.json")
+
+
+def _load_archive() -> dict:
+    if os.path.exists(_ARCHIVE_PATH):
+        try:
+            with open(_ARCHIVE_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"episodes": {}}
+
+
+def _save_archive(archive: dict) -> None:
+    with open(_ARCHIVE_PATH, "w", encoding="utf-8") as f:
+        json.dump(archive, f, ensure_ascii=False, indent=2)
+
+
+def _ep_key(slug: str, season: int, episode: int) -> str:
+    return f"{slug}_t{season:02d}_ep{episode:02d}"
+
+
+def _archive_ensure_episode(slug: str, display: str, season: int, episode: int) -> dict:
+    """Obtiene o crea la entrada del episodio en el archivo."""
+    archive = _load_archive()
+    key = _ep_key(slug, season, episode)
+    if key not in archive["episodes"]:
+        archive["episodes"][key] = {
+            "id": key,
+            "podcast": display,
+            "podcast_slug": slug,
+            "season": season,
+            "episode": episode,
+            "date": date.today().isoformat(),
+            "guest_name": "",
+            "script": "",
+            "spotify_title": "",
+            "spotify_description": "",
+            "clips": [],
+        }
+        _save_archive(archive)
+    return archive
+
+
+def _archive_set_script(slug, display, season, episode, guest_name, script):
+    archive = _archive_ensure_episode(slug, display, season, episode)
+    key = _ep_key(slug, season, episode)
+    archive["episodes"][key]["guest_name"] = guest_name
+    archive["episodes"][key]["script"] = script
+    _save_archive(archive)
+
+
+def _archive_set_spotify(slug, display, season, episode, title, description):
+    archive = _archive_ensure_episode(slug, display, season, episode)
+    key = _ep_key(slug, season, episode)
+    archive["episodes"][key]["spotify_title"] = title
+    archive["episodes"][key]["spotify_description"] = description
+    _save_archive(archive)
+
+
+def _archive_set_clips(slug, display, season, episode, clips_results):
+    archive = _archive_ensure_episode(slug, display, season, episode)
+    key = _ep_key(slug, season, episode)
+    archive["episodes"][key]["clips"] = [
+        {
+            "index": i,
+            "transcript":        r.get("transcript", ""),
+            "instagram_caption": r.get("instagram_caption", ""),
+            "linkedin_caption":  r.get("linkedin_caption", ""),
+        }
+        for i, r in enumerate(clips_results, start=1)
+    ]
+    _save_archive(archive)
+
+
+def _archive_to_text(archive: dict) -> str:
+    """Exporta todo el archivo como texto plano."""
+    lines = []
+    episodes = sorted(
+        archive["episodes"].values(),
+        key=lambda x: (x["podcast_slug"], x["season"], x["episode"]),
+    )
+    for ep in episodes:
+        sep = "=" * 60
+        lines += [sep, f"{ep['podcast']}  —  T{ep['season']:02d}E{ep['episode']:02d}"]
+        if ep.get("guest_name"):
+            lines.append(f"Invitado: {ep['guest_name']}")
+        if ep.get("date"):
+            lines.append(f"Fecha: {ep['date']}")
+        lines.append("")
+        if ep.get("script"):
+            lines += ["── GUIÓN ──", ep["script"], ""]
+        if ep.get("spotify_title"):
+            lines += [
+                "── SPOTIFY ──",
+                f"Título: {ep['spotify_title']}",
+                ep.get("spotify_description", ""),
+                "",
+            ]
+        for clip in ep.get("clips", []):
+            lines += [
+                f"── CLIP {clip['index']} ──",
+                "Transcript:", clip.get("transcript", ""), "",
+                "Instagram:",  clip.get("instagram_caption", ""), "",
+                "LinkedIn:",   clip.get("linkedin_caption", ""), "",
+            ]
+        lines.append("")
+    return "\n".join(lines)
+
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
@@ -428,263 +542,350 @@ with st.sidebar:
     )
 
 
-# ── Verificar imagen de fondo disponible ─────────────────────────────────────
+# ── Tabs principales ──────────────────────────────────────────────────────────
 
 bg_bytes = st.session_state.bg_ladrando if podcast_slug == "ladrando-ideas" else st.session_state.bg_ftbp
 
-if not bg_bytes:
-    st.warning(
-        f"⚠️ Sube la imagen de fondo para **{podcast_display}** en el sidebar antes de continuar."
+tab_clips, tab_script, tab_archive = st.tabs(["🎬 Clips", "✍️ Guión", "📚 Archivo"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — CLIPS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab_clips:
+
+    if not bg_bytes:
+        st.warning(f"⚠️ Sube la imagen de fondo para **{podcast_display}** en el sidebar antes de continuar.")
+
+    # ── Upload de audio ───────────────────────────────────────────────────────
+    uploaded_audio = st.file_uploader(
+        "🎵 Sube el episodio completo (MP3, M4A o WAV)",
+        type=SUPPORTED_AUDIO_FORMATS,
+        help=f"El audio exportado para Spotify funciona directo. Máximo {MAX_UPLOAD_MB} MB.",
     )
 
+    if uploaded_audio:
+        if st.session_state.audio_filename != uploaded_audio.name:
+            st.session_state.audio_filename   = uploaded_audio.name
+            st.session_state.normalized_bytes = None
+            st.session_state.audio_path       = _save_upload(uploaded_audio, prefix="episode_raw")
+            st.session_state.transcription    = None
+            st.session_state.viral_moments    = None
+            st.session_state.clips_ready      = []
 
-# ── Upload de audio ───────────────────────────────────────────────────────────
+        st.success(f"✅ **{uploaded_audio.name}** cargado.")
 
-uploaded_audio = st.file_uploader(
-    "🎵 Sube el episodio completo (MP3, M4A o WAV)",
-    type=SUPPORTED_AUDIO_FORMATS,
-    help=f"El audio exportado para Spotify funciona directo. Máximo {MAX_UPLOAD_MB} MB.",
-)
+        col_norm, col_skip = st.columns(2)
+        if col_norm.button("🔊 Normalizar volumen antes de analizar", use_container_width=True):
+            temp_dir = _get_or_create_temp_dir()
+            normalized_path = os.path.join(temp_dir, "episode_normalized.mp3")
+            with st.spinner("Normalizando volumen... (puede tardar 1-2 min)"):
+                try:
+                    normalize_audio(st.session_state.audio_path, normalized_path)
+                    st.session_state.audio_path = normalized_path
+                    with open(normalized_path, "rb") as f:
+                        st.session_state.normalized_bytes = f.read()
+                    st.session_state.transcription = None
+                    st.session_state.viral_moments = None
+                    st.session_state.clips_ready   = []
+                except Exception as e:
+                    st.warning(f"Normalización falló, se usará el audio original: {e}")
 
-if uploaded_audio:
-    # Al cambiar el archivo, guardar raw y resetear estado
-    if st.session_state.audio_filename != uploaded_audio.name:
-        st.session_state.audio_filename   = uploaded_audio.name
-        st.session_state.normalized_bytes = None
-        st.session_state.audio_path       = _save_upload(uploaded_audio, prefix="episode_raw")
-        st.session_state.transcription    = None
-        st.session_state.viral_moments    = None
-        st.session_state.clips_ready      = []
+        if st.session_state.get("normalized_bytes"):
+            base_name = os.path.splitext(uploaded_audio.name)[0]
+            st.caption("✅ Audio normalizado.")
+            col_skip.download_button(
+                label="⬇️ Descargar normalizado",
+                data=st.session_state.normalized_bytes,
+                file_name=f"{base_name}_normalizado.mp3",
+                mime="audio/mpeg",
+                key="dl_normalized",
+                use_container_width=True,
+            )
 
-    st.success(f"✅ **{uploaded_audio.name}** cargado.")
+    # ── Análisis ──────────────────────────────────────────────────────────────
+    if st.session_state.audio_path and bg_bytes:
+        if st.button("🔍 Analizar episodio", type="primary"):
+            st.session_state.viral_moments = None
+            st.session_state.clips_ready   = []
 
-    # Pregunta de normalización
-    col_norm, col_skip = st.columns([1, 1])
-    if col_norm.button("🔊 Normalizar volumen antes de analizar", use_container_width=True):
-        temp_dir = _get_or_create_temp_dir()
-        normalized_path = os.path.join(temp_dir, "episode_normalized.mp3")
-        with st.spinner("Normalizando volumen... (puede tardar 1-2 min)"):
-            try:
-                normalize_audio(st.session_state.audio_path, normalized_path)
-                st.session_state.audio_path = normalized_path
-                with open(normalized_path, "rb") as f:
-                    st.session_state.normalized_bytes = f.read()
-                st.session_state.transcription = None
-                st.session_state.viral_moments = None
-                st.session_state.clips_ready   = []
-            except Exception as e:
-                st.warning(f"Normalización falló, se usará el audio original: {e}")
+            with st.spinner("🎙️ Transcribiendo con Whisper..."):
+                try:
+                    transcription = transcribe(st.session_state.audio_path, language=WHISPER_LANGUAGE)
+                    st.session_state.transcription = transcription
+                except Exception as e:
+                    st.error(f"Error en la transcripción: {e}")
+                    st.stop()
 
-    if st.session_state.get("normalized_bytes"):
-        base_name = os.path.splitext(uploaded_audio.name)[0]
-        st.caption("✅ Audio normalizado.")
-        col_skip.download_button(
-            label="⬇️ Descargar normalizado",
-            data=st.session_state.normalized_bytes,
-            file_name=f"{base_name}_normalizado.mp3",
-            mime="audio/mpeg",
-            key="dl_normalized",
-            use_container_width=True,
-        )
-
-
-# ── Análisis automático ───────────────────────────────────────────────────────
-
-if st.session_state.audio_path and bg_bytes:
-    if st.button("🔍 Analizar episodio", type="primary"):
-        st.session_state.viral_moments = None
-        st.session_state.clips_ready   = []
-
-        with st.spinner("🎙️ Transcribiendo con Whisper... (puede tardar unos minutos)"):
-            try:
-                transcription = transcribe(st.session_state.audio_path, language=WHISPER_LANGUAGE)
-                st.session_state.transcription = transcription
-            except Exception as e:
-                st.error(f"Error en la transcripción: {e}")
-                st.stop()
-
-        with st.spinner("🧠 Detectando mejores momentos con Claude..."):
-            try:
-                transcript_text = format_for_claude(transcription)
-                moments = detect_viral_moments(
-                    transcript_text=transcript_text,
-                    episode_number=episode_number,
-                    podcast_name=podcast_display,
-                )
-                # Snap timestamps a límites naturales de palabras
-                words_full = transcription.get("words", [])
-                max_clip = CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE
-                for m in moments:
-                    snapped_start, snapped_end = snap_to_word_boundaries(
-                        m["start_time"], m["end_time"], words_full
+            with st.spinner("🧠 Detectando mejores momentos con Claude..."):
+                try:
+                    transcript_text = format_for_claude(st.session_state.transcription)
+                    moments = detect_viral_moments(
+                        transcript_text=transcript_text,
+                        episode_number=episode_number,
+                        podcast_name=podcast_display,
                     )
-                    # Hard cap: nunca más de 65s aunque Claude se equivoque
-                    if snapped_end - snapped_start > max_clip:
-                        snapped_end = snapped_start + CLIP_DURATION_SECONDS
-                    m["start_time"] = snapped_start
-                    m["end_time"]   = snapped_end
-                    m["duration_seconds"] = round(snapped_end - snapped_start, 1)
+                    words_full = st.session_state.transcription.get("words", [])
+                    max_clip = CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE
+                    for m in moments:
+                        snapped_start, snapped_end = snap_to_word_boundaries(
+                            m["start_time"], m["end_time"], words_full
+                        )
+                        if snapped_end - snapped_start > max_clip:
+                            snapped_end = snapped_start + CLIP_DURATION_SECONDS
+                        m["start_time"]       = snapped_start
+                        m["end_time"]         = snapped_end
+                        m["duration_seconds"] = round(snapped_end - snapped_start, 1)
+                    st.session_state.viral_moments = moments
+                    if not moments:
+                        st.warning("Claude no detectó momentos virales.")
+                except Exception as e:
+                    st.error(f"Error al detectar momentos virales: {e}")
+                    st.stop()
 
-                st.session_state.viral_moments = moments
-                if not moments:
-                    st.warning("Claude no detectó momentos virales. Intenta con otro episodio.")
-            except Exception as e:
-                st.error(f"Error al detectar momentos virales: {e}")
-                st.stop()
+    # ── Transcript + Spotify ──────────────────────────────────────────────────
+    if st.session_state.transcription:
+        st.divider()
+        st.subheader("📄 Transcript y Spotify")
+
+        full_text = st.session_state.transcription.get("text", "")
+        if full_text:
+            st.download_button(
+                label="⬇️ Descargar transcript completo (.txt)",
+                data=full_text,
+                file_name=f"transcript_s{season_number:02d}e{episode_number:02d}.txt",
+                mime="text/plain",
+                key="dl_transcript_full",
+            )
+
+        episode_title_input = st.text_input(
+            "Título del episodio",
+            placeholder="Ej: Cómo fracasar bien y aprender de ello",
+            key="episode_title_input",
+        )
+        if st.button("✍️ Generar título y descripción para Spotify", key="btn_spotify_desc", type="secondary"):
+            with st.spinner("Generando con Claude..."):
+                try:
+                    sp_result = generate_episode_description(
+                        transcript_text=st.session_state.transcription.get("text", ""),
+                        episode_title=episode_title_input or "Sin título",
+                        podcast_name=podcast_display,
+                        season_number=season_number,
+                        episode_number=episode_number,
+                    )
+                    st.session_state.episode_description = sp_result
+                    # Guardar en archivo
+                    _archive_set_spotify(
+                        podcast_slug, podcast_display, season_number, episode_number,
+                        sp_result["title"], sp_result["description"],
+                    )
+                except Exception as e:
+                    st.error(f"Error al generar descripción: {e}")
+
+        if st.session_state.episode_description:
+            d = st.session_state.episode_description
+            st.text_input("Título sugerido", value=d["title"], key="spotify_title_out")
+            st.text_area("Descripción para Spotify", value=d["description"], height=160, key="spotify_desc_output")
+
+    # ── Momentos y clips ──────────────────────────────────────────────────────
+    if st.session_state.viral_moments:
+        st.header(f"🎯 {len(st.session_state.viral_moments)} momentos detectados")
+        st.caption("Ajusta los timestamps si necesitas, luego genera los clips.")
+
+        selected_clips = []
+        for i, moment in enumerate(st.session_state.viral_moments):
+            with st.expander(
+                f"Momento {i+1}  ·  Score {moment.get('viral_score','—')}/10  ·  {moment.get('duration_seconds','—')}s",
+                expanded=True,
+            ):
+                st.markdown(f"**Hook:** _{moment.get('hook', '')}_")
+                st.markdown(f"**Por qué funciona:** {moment.get('reason', '')}")
+                c1, c2, c3 = st.columns([2, 2, 1])
+                start_edited = c1.text_input("Inicio", value=_seconds_to_hhmmss(moment.get("start_time", 0)), key=f"start_{i}")
+                end_edited   = c2.text_input("Fin",    value=_seconds_to_hhmmss(moment.get("end_time",   0)), key=f"end_{i}")
+                if c3.checkbox("Incluir", value=True, key=f"include_{i}"):
+                    selected_clips.append({"start": start_edited, "end": end_edited})
+
+        if selected_clips and st.button(f"🎬 Generar {len(selected_clips)} clip(s)", type="primary"):
+            temp_dir = _get_or_create_temp_dir()
+            bg_path  = _save_image_bytes(
+                st.session_state.bg_ladrando if podcast_slug == "ladrando-ideas" else st.session_state.bg_ftbp
+            )
+            results  = []
+            progress = st.progress(0)
+            clip_num = 0
+
+            for pos, clip_info in enumerate(selected_clips, start=1):
+                progress.progress(int((pos-1)/len(selected_clips)*100), text=f"Generando clip {pos}/{len(selected_clips)}...")
+                try:
+                    start_sec = _hhmmss_to_seconds(clip_info["start"])
+                    end_sec   = _hhmmss_to_seconds(clip_info["end"])
+                except ValueError as e:
+                    st.error(f"Clip {pos}: {e}"); continue
+                if end_sec <= start_sec:
+                    st.error(f"Clip {pos}: el fin debe ser posterior al inicio."); continue
+                if end_sec - start_sec > CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE:
+                    end_sec = start_sec + CLIP_DURATION_SECONDS
+                clip_num += 1
+                try:
+                    result = _process_single_clip(
+                        audio_path=st.session_state.audio_path,
+                        start_sec=start_sec, end_sec=end_sec,
+                        background_image_path=bg_path,
+                        clip_index=clip_num,
+                        season_number=season_number, episode_number=episode_number,
+                        podcast_slug=podcast_slug,
+                        transcription=st.session_state.transcription,
+                        temp_dir=temp_dir,
+                    )
+                    results.append(result)
+                except Exception as e:
+                    st.error(f"Error en clip {pos}: {e}"); continue
+
+            progress.progress(100, text="¡Listo!")
+            progress.empty()
+            st.session_state.clips_ready = results
+            # Guardar copies en archivo (sin video ni audio)
+            if results:
+                _archive_set_clips(podcast_slug, podcast_display, season_number, episode_number, results)
+
+    # ── Resultados ────────────────────────────────────────────────────────────
+    if st.session_state.clips_ready:
+        st.header("🎉 Clips listos")
+        for i, result in enumerate(st.session_state.clips_ready, start=1):
+            _render_clip_result(result, i)
+    elif not st.session_state.audio_path:
+        st.info("👆 Sube el audio del episodio para comenzar.")
+    elif not bg_bytes:
+        st.info(f"👈 Sube la imagen de fondo para {podcast_display} en el sidebar.")
 
 
-# ── Transcript completo + descripción Spotify ─────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — GUIÓN
+# ═══════════════════════════════════════════════════════════════════════════════
 
-if st.session_state.transcription:
-    st.divider()
-    st.subheader("📄 Transcript y descripción del episodio")
+with tab_script:
+    st.subheader("✍️ Generador de Guión")
+    st.caption(f"Podcast: **{podcast_display}** · T{season_number:02d}E{episode_number:02d}")
 
-    # Descarga del transcript completo
-    full_text = st.session_state.transcription.get("text", "")
-    if full_text:
+    guest_name = st.text_input("Nombre del invitado", placeholder="Ej: Iván Vázquez", key="script_guest_name")
+    guest_bio  = st.text_area(
+        "Bio del invitado",
+        placeholder="Quién es, qué hace, por qué es relevante para el podcast...",
+        height=120,
+        key="script_guest_bio",
+    )
+    topics = st.text_area(
+        "Temas a cubrir",
+        placeholder="Ej:\n- Cómo nació su empresa después de una bancarrota\n- La decisión de no tener plan B\n- Expansión a mercado USA",
+        height=120,
+        key="script_topics",
+    )
+    duration_min = st.slider("Duración estimada del episodio (minutos)", 30, 120, 60, step=15, key="script_duration")
+
+    if st.button("📝 Generar guión", type="primary", key="btn_generate_script"):
+        if not guest_name.strip():
+            st.warning("Escribe el nombre del invitado para continuar.")
+        else:
+            with st.spinner("Escribiendo guión con Claude..."):
+                try:
+                    script = generate_podcast_script(
+                        guest_name=guest_name,
+                        guest_bio=guest_bio or "Sin bio proporcionada.",
+                        topics=topics or "Temas generales del podcast.",
+                        podcast_name=podcast_display,
+                        season_number=season_number,
+                        episode_number=episode_number,
+                        duration_minutes=duration_min,
+                    )
+                    st.session_state["generated_script"] = script
+                    st.session_state["script_guest_name_saved"] = guest_name
+                    # Guardar en archivo
+                    _archive_set_script(podcast_slug, podcast_display, season_number, episode_number, guest_name, script)
+                    st.success("✅ Guión guardado en el Archivo automáticamente.")
+                except Exception as e:
+                    st.error(f"Error al generar guión: {e}")
+
+    if st.session_state.get("generated_script"):
+        st.divider()
+        st.text_area("Guión generado", value=st.session_state["generated_script"], height=500, key="script_output")
         st.download_button(
-            label="⬇️ Descargar transcript completo (.txt)",
-            data=full_text,
-            file_name=f"transcript_s{season_number:02d}e{episode_number:02d}.txt",
+            label="⬇️ Descargar guión (.txt)",
+            data=st.session_state["generated_script"],
+            file_name=f"guion_{podcast_slug}_t{season_number:02d}_ep{episode_number:02d}.txt",
             mime="text/plain",
-            key="dl_transcript_full",
+            key="dl_script",
         )
 
-    # Generador de descripción para Spotify
-    st.subheader("🎧 Título y descripción para Spotify")
-    episode_title_input = st.text_input(
-        "Título del episodio",
-        placeholder="Ej: Cómo fracasar bien y aprender de ello",
-        key="episode_title_input",
-    )
-    if st.button("✍️ Generar título y descripción", key="btn_spotify_desc", type="secondary"):
-        # Texto plano del transcript — más compacto que el formateado con timestamps
-        transcript_text_full = st.session_state.transcription.get("text", "")
-        with st.spinner("Generando con Claude..."):
-            try:
-                result = generate_episode_description(
-                    transcript_text=transcript_text_full,
-                    episode_title=episode_title_input or "Sin título",
-                    podcast_name=podcast_display,
-                    season_number=season_number,
-                    episode_number=episode_number,
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — ARCHIVO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab_archive:
+    st.subheader("📚 Archivo de Episodios")
+    st.caption("Solo texto: guiones, copies de Instagram y LinkedIn. Sin audio ni video.")
+
+    archive = _load_archive()
+    episodes = archive.get("episodes", {})
+
+    if not episodes:
+        st.info("El archivo está vacío. Genera guiones o clips para que aparezcan aquí.")
+    else:
+        # Botón para descargar todo como un solo .txt
+        full_text = _archive_to_text(archive)
+        st.download_button(
+            label=f"⬇️ Descargar archivo completo ({len(episodes)} episodio{'s' if len(episodes) != 1 else ''}) — .txt",
+            data=full_text,
+            file_name="archivo_episodios.txt",
+            mime="text/plain",
+            key="dl_archive_full",
+        )
+
+        st.divider()
+
+        # Mostrar cada episodio
+        for key, ep in sorted(episodes.items(), key=lambda x: (x[1]["podcast_slug"], x[1]["season"], x[1]["episode"]), reverse=True):
+            label = f"**{ep['podcast']}** · T{ep['season']:02d}E{ep['episode']:02d}"
+            if ep.get("guest_name"):
+                label += f" · {ep['guest_name']}"
+            if ep.get("date"):
+                label += f" · {ep['date']}"
+
+            with st.expander(label, expanded=False):
+                if ep.get("script"):
+                    st.markdown("**📝 Guión**")
+                    st.text_area("", value=ep["script"], height=200, key=f"arc_script_{key}")
+                    st.download_button(
+                        "⬇️ Guión",
+                        data=ep["script"],
+                        file_name=f"guion_{key}.txt",
+                        mime="text/plain",
+                        key=f"dl_arc_script_{key}",
+                    )
+
+                if ep.get("spotify_title"):
+                    st.markdown("**🎧 Spotify**")
+                    st.text(f"Título: {ep['spotify_title']}")
+                    st.text_area("", value=ep.get("spotify_description", ""), height=80, key=f"arc_sp_{key}")
+
+                for clip in ep.get("clips", []):
+                    st.markdown(f"**🎬 Clip {clip['index']}**")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.caption("Instagram")
+                        st.text_area("", value=clip.get("instagram_caption", ""), height=120, key=f"arc_ig_{key}_{clip['index']}")
+                    with col2:
+                        st.caption("LinkedIn")
+                        st.text_area("", value=clip.get("linkedin_caption", ""), height=120, key=f"arc_li_{key}_{clip['index']}")
+
+                # Descargar este episodio solo
+                ep_archive = {"episodes": {key: ep}}
+                st.download_button(
+                    "⬇️ Descargar este episodio (.txt)",
+                    data=_archive_to_text(ep_archive),
+                    file_name=f"episodio_{key}.txt",
+                    mime="text/plain",
+                    key=f"dl_arc_ep_{key}",
                 )
-                st.session_state.episode_description = result
-            except Exception as e:
-                st.error(f"Error al generar descripción: {e}")
-
-    if st.session_state.episode_description:
-        d = st.session_state.episode_description
-        st.text_input("Título sugerido", value=d["title"], key="spotify_title_out")
-        st.text_area("Descripción para Spotify", value=d["description"], height=160, key="spotify_desc_output")
-
-
-
-# ── Mostrar momentos y generar clips ─────────────────────────────────────────
-
-if st.session_state.viral_moments:
-    st.header(f"🎯 {len(st.session_state.viral_moments)} momentos detectados")
-    st.caption("Ajusta los timestamps si lo necesitas, luego genera los clips.")
-
-    selected_clips = []
-
-    for i, moment in enumerate(st.session_state.viral_moments):
-        score    = moment.get("viral_score", "—")
-        duration = moment.get("duration_seconds", "—")
-        hook     = moment.get("hook", "")
-        reason   = moment.get("reason", "")
-
-        with st.expander(
-            f"Momento {i + 1}  ·  Score {score}/10  ·  {duration}s",
-            expanded=True,
-        ):
-            st.markdown(f"**Hook:** _{hook}_")
-            st.markdown(f"**Por qué funciona:** {reason}")
-
-            c1, c2, c3 = st.columns([2, 2, 1])
-            start_edited = c1.text_input(
-                "Inicio",
-                value=_seconds_to_hhmmss(moment.get("start_time", 0)),
-                key=f"start_{i}",
-            )
-            end_edited = c2.text_input(
-                "Fin",
-                value=_seconds_to_hhmmss(moment.get("end_time", 0)),
-                key=f"end_{i}",
-            )
-            include = c3.checkbox("Incluir", value=True, key=f"include_{i}")
-
-            if include:
-                selected_clips.append({"start": start_edited, "end": end_edited})
-
-    if selected_clips and st.button(
-        f"🎬 Generar {len(selected_clips)} clip(s)",
-        type="primary",
-    ):
-        temp_dir = _get_or_create_temp_dir()
-
-        # Guardar imagen de fondo en temp
-        suffix = ".jpg"
-        if podcast_slug == "ladrando-ideas" and st.session_state.bg_ladrando:
-            bg_path = _save_image_bytes(st.session_state.bg_ladrando, suffix)
-        else:
-            bg_path = _save_image_bytes(st.session_state.bg_ftbp, suffix)
-
-        results   = []
-        progress  = st.progress(0)
-        clip_num  = 0
-
-        for pos, clip_info in enumerate(selected_clips, start=1):
-            pct = int((pos - 1) / len(selected_clips) * 100)
-            progress.progress(pct, text=f"Generando clip {pos}/{len(selected_clips)}...")
-
-            try:
-                start_sec = _hhmmss_to_seconds(clip_info["start"])
-                end_sec   = _hhmmss_to_seconds(clip_info["end"])
-            except ValueError as e:
-                st.error(f"Clip {pos}: {e}")
-                continue
-
-            if end_sec <= start_sec:
-                st.error(f"Clip {pos}: el fin debe ser posterior al inicio.")
-                continue
-
-            # Hard cap de seguridad en generación — nunca más de 65s
-            if end_sec - start_sec > CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE:
-                end_sec = start_sec + CLIP_DURATION_SECONDS
-
-            clip_num += 1
-            try:
-                result = _process_single_clip(
-                    audio_path=st.session_state.audio_path,
-                    start_sec=start_sec,
-                    end_sec=end_sec,
-                    background_image_path=bg_path,
-                    clip_index=clip_num,
-                    season_number=season_number,
-                    episode_number=episode_number,
-                    podcast_slug=podcast_slug,
-                    transcription=st.session_state.transcription,
-                    temp_dir=temp_dir,
-                )
-                results.append(result)
-            except Exception as e:
-                st.error(f"Error en clip {pos}: {e}")
-                continue
-
-        progress.progress(100, text="¡Listo!")
-        progress.empty()
-        st.session_state.clips_ready = results
-
-
-# ── Resultados ────────────────────────────────────────────────────────────────
-
-if st.session_state.clips_ready:
-    st.header("🎉 Clips listos para Instagram")
-    for i, result in enumerate(st.session_state.clips_ready, start=1):
-        _render_clip_result(result, i)
-
-elif not st.session_state.audio_path:
-    st.info("👆 Sube el audio del episodio para comenzar.")
-elif not bg_bytes:
-    st.info(f"👈 Sube la imagen de fondo para {podcast_display} en el sidebar.")

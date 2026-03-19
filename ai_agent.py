@@ -363,6 +363,91 @@ def generate_linkedin_image(image_prompt: str) -> bytes:
         return r.read()
 
 
+_SCRIPT_SYSTEM = """Eres productor de podcasts de negocios en español latinoamericano.
+Generas guiones de entrevista estructurados, conversacionales y directos.
+Sin frases corporativas, sin relleno. El host habla como persona real."""
+
+_SCRIPT_TEMPLATE = """Genera el guión completo para el episodio {season}x{episode}
+del podcast "{podcast_name}".
+
+INVITADO: {guest_name}
+BIO:
+{guest_bio}
+
+TEMAS A CUBRIR:
+{topics}
+
+DURACIÓN ESTIMADA: {duration} minutos
+
+ESTRUCTURA OBLIGATORIA:
+
+## INTRO DEL HOST
+(2-3 oraciones para abrir el episodio y presentar al invitado)
+
+## BLOQUE 1 — CALENTAMIENTO (primeros 10-15 min)
+3-4 preguntas para conocer al invitado. Fáciles, que lo pongan en contexto.
+Por cada pregunta:
+- Pregunta principal
+- Seguimiento si la respuesta es superficial
+- _Por qué esta pregunta importa (nota interna para el host)_
+
+## BLOQUE 2 — EL CORE ({core_duration} min)
+5-6 preguntas profundas sobre los temas clave. Aquí va la carne del episodio.
+Misma estructura que el bloque 1.
+
+## BLOQUE 3 — CIERRE (últimos 5-10 min)
+2-3 preguntas de cierre + una pregunta final reflexiva.
+Misma estructura.
+
+## OUTRO DEL HOST
+(1-2 oraciones para cerrar, mencionar dónde seguir al invitado)
+
+Responde únicamente con el guión en texto plano con los encabezados de sección."""
+
+
+def generate_podcast_script(
+    guest_name: str,
+    guest_bio: str,
+    topics: str,
+    podcast_name: str,
+    season_number: int,
+    episode_number: int,
+    duration_minutes: int = 60,
+) -> str:
+    """
+    Genera un guión estructurado de entrevista para el episodio.
+
+    Returns:
+        Guión como string listo para copiar/descargar
+    """
+    client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
+
+    core_duration = max(duration_minutes - 25, 20)
+
+    user_message = _SCRIPT_TEMPLATE.format(
+        season=season_number,
+        episode=episode_number,
+        podcast_name=podcast_name,
+        guest_name=guest_name,
+        guest_bio=guest_bio,
+        topics=topics,
+        duration=duration_minutes,
+        core_duration=core_duration,
+    )
+
+    try:
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=4096,
+            system=_SCRIPT_SYSTEM,
+            messages=[{"role": "user", "content": user_message}],
+        )
+    except anthropic.APIError as e:
+        raise RuntimeError(f"Error al llamar a la Claude API: {e}") from e
+
+    return response.content[0].text.strip()
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _extract_json_block(text: str) -> str:
