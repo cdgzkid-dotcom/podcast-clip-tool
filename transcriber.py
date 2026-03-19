@@ -170,7 +170,7 @@ def snap_to_word_boundaries(
     return snapped_start, snapped_end
 
 
-def format_for_claude(transcription: dict, max_chars: int = 8000) -> str:
+def format_for_claude(transcription: dict, max_chars: int = 150000) -> str:
     """
     Formatea la transcripción con timestamps para el prompt de Claude.
 

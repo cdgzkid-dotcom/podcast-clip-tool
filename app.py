@@ -23,6 +23,7 @@ import streamlit as st
 from config import (
     APP_TITLE,
     CLIP_DURATION_SECONDS,
+    CLIP_DURATION_TOLERANCE,
     MAX_UPLOAD_MB,
     MAX_VIRAL_MOMENTS,
     OUTPUT_SUBTITLE_EXT,
@@ -162,7 +163,9 @@ def _render_clip_result(result: dict, clip_number: int) -> None:
     """Renderiza los resultados de un clip."""
     st.subheader(f"Clip {clip_number} — `{result['filename_base']}`")
 
-    st.video(result["video_bytes"])
+    vid_col, _ = st.columns([1, 3])
+    with vid_col:
+        st.video(result["video_bytes"])
 
     col1, col2 = st.columns(2)
     col1.download_button(
@@ -402,10 +405,14 @@ if st.session_state.audio_path and bg_bytes:
                 )
                 # Snap timestamps a límites naturales de palabras
                 words_full = transcription.get("words", [])
+                max_clip = CLIP_DURATION_SECONDS + CLIP_DURATION_TOLERANCE
                 for m in moments:
                     snapped_start, snapped_end = snap_to_word_boundaries(
                         m["start_time"], m["end_time"], words_full
                     )
+                    # Hard cap: nunca más de 65s aunque Claude se equivoque
+                    if snapped_end - snapped_start > max_clip:
+                        snapped_end = snapped_start + CLIP_DURATION_SECONDS
                     m["start_time"] = snapped_start
                     m["end_time"]   = snapped_end
                     m["duration_seconds"] = round(snapped_end - snapped_start, 1)
