@@ -203,6 +203,7 @@ st.title(APP_TITLE)
 for key, default in {
     "audio_path":         None,
     "audio_filename":     None,
+    "normalized_bytes":   None,
     "transcription":      None,
     "viral_moments":      None,
     "clips_ready":        [],
@@ -312,15 +313,17 @@ uploaded_audio = st.file_uploader(
 
 if uploaded_audio:
     if st.session_state.audio_filename != uploaded_audio.name:
-        st.session_state.audio_filename  = uploaded_audio.name
+        st.session_state.audio_filename   = uploaded_audio.name
+        st.session_state.normalized_bytes = None  # reset al cambiar archivo
         raw_path = _save_upload(uploaded_audio, prefix="episode_raw")
-        # Normalizar volumen del episodio completo antes de transcribir/cortar
         temp_dir = _get_or_create_temp_dir()
         normalized_path = os.path.join(temp_dir, "episode_normalized.mp3")
-        with st.spinner("🔊 Normalizando volumen del episodio..."):
+        with st.spinner("🔊 Normalizando volumen del episodio... (puede tardar 1-2 min)"):
             try:
                 normalize_audio(raw_path, normalized_path)
                 st.session_state.audio_path = normalized_path
+                with open(normalized_path, "rb") as f:
+                    st.session_state.normalized_bytes = f.read()
             except Exception as e:
                 st.warning(f"Normalización falló, se usará el audio original: {e}")
                 st.session_state.audio_path = raw_path
@@ -329,7 +332,18 @@ if uploaded_audio:
         st.session_state.viral_moments   = None
         st.session_state.clips_ready     = []
 
-    st.success(f"✅ Audio cargado: **{uploaded_audio.name}**")
+    st.success(f"✅ Audio listo: **{uploaded_audio.name}**")
+
+    # Descarga del episodio normalizado
+    if st.session_state.get("normalized_bytes"):
+        base_name = os.path.splitext(uploaded_audio.name)[0]
+        st.download_button(
+            label="⬇️ Descargar episodio normalizado (MP3)",
+            data=st.session_state.normalized_bytes,
+            file_name=f"{base_name}_normalizado.mp3",
+            mime="audio/mpeg",
+            key="dl_normalized",
+        )
 
 
 # ── Análisis automático ───────────────────────────────────────────────────────

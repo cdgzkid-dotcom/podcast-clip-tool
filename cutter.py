@@ -44,7 +44,7 @@ def normalize_audio(input_path: str, output_path: str) -> str:
         "-y",
         "-i", input_path,
         "-af", AUDIO_NORMALIZE_FILTER,
-        "-c:a", AUDIO_CODEC,
+        "-codec:a", "libmp3lame",   # MP3 requiere libmp3lame, no aac
         "-b:a", "192k",
         output_path,
     ]
