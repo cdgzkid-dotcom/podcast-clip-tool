@@ -346,37 +346,44 @@ uploaded_audio = st.file_uploader(
 )
 
 if uploaded_audio:
+    # Al cambiar el archivo, guardar raw y resetear estado
     if st.session_state.audio_filename != uploaded_audio.name:
         st.session_state.audio_filename   = uploaded_audio.name
-        st.session_state.normalized_bytes = None  # reset al cambiar archivo
-        raw_path = _save_upload(uploaded_audio, prefix="episode_raw")
+        st.session_state.normalized_bytes = None
+        st.session_state.audio_path       = _save_upload(uploaded_audio, prefix="episode_raw")
+        st.session_state.transcription    = None
+        st.session_state.viral_moments    = None
+        st.session_state.clips_ready      = []
+
+    st.success(f"✅ **{uploaded_audio.name}** cargado.")
+
+    # Pregunta de normalización
+    col_norm, col_skip = st.columns([1, 1])
+    if col_norm.button("🔊 Normalizar volumen antes de analizar", use_container_width=True):
         temp_dir = _get_or_create_temp_dir()
         normalized_path = os.path.join(temp_dir, "episode_normalized.mp3")
-        with st.spinner("🔊 Normalizando volumen del episodio... (puede tardar 1-2 min)"):
+        with st.spinner("Normalizando volumen... (puede tardar 1-2 min)"):
             try:
-                normalize_audio(raw_path, normalized_path)
+                normalize_audio(st.session_state.audio_path, normalized_path)
                 st.session_state.audio_path = normalized_path
                 with open(normalized_path, "rb") as f:
                     st.session_state.normalized_bytes = f.read()
+                st.session_state.transcription = None
+                st.session_state.viral_moments = None
+                st.session_state.clips_ready   = []
             except Exception as e:
                 st.warning(f"Normalización falló, se usará el audio original: {e}")
-                st.session_state.audio_path = raw_path
-        # Reset estado derivado al cambiar el audio
-        st.session_state.transcription   = None
-        st.session_state.viral_moments   = None
-        st.session_state.clips_ready     = []
 
-    st.success(f"✅ Audio listo: **{uploaded_audio.name}**")
-
-    # Descarga del episodio normalizado
     if st.session_state.get("normalized_bytes"):
         base_name = os.path.splitext(uploaded_audio.name)[0]
-        st.download_button(
-            label="⬇️ Descargar episodio normalizado (MP3)",
+        st.caption("✅ Audio normalizado.")
+        col_skip.download_button(
+            label="⬇️ Descargar normalizado",
             data=st.session_state.normalized_bytes,
             file_name=f"{base_name}_normalizado.mp3",
             mime="audio/mpeg",
             key="dl_normalized",
+            use_container_width=True,
         )
 
 
