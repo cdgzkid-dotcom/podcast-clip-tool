@@ -208,11 +208,44 @@ for key, default in {
     "viral_moments":      None,
     "clips_ready":        [],
     "episode_number":     1,
-    "bg_ladrando":        None,   # bytes de la imagen de Ladrando Ideas
-    "bg_ftbp":            None,   # bytes de la imagen de FTBP
+    "season_number":      1,
+    "bg_ladrando":        None,
+    "bg_ftbp":            None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
+# Rutas fijas en /tmp para persistir imágenes entre sesiones (mismo contenedor)
+# y en assets/ del repo como backup permanente si el usuario las commitea.
+_BG_TMP = {
+    "ladrando-ideas": "/tmp/podcast_bg_ladrando.jpg",
+    "ftbp":           "/tmp/podcast_bg_ftbp.jpg",
+}
+_BG_ASSETS = {
+    "ladrando-ideas": "assets/bg_ladrando.jpg",
+    "ftbp":           "assets/bg_ftbp.jpg",
+}
+
+def _load_bg(slug: str, state_key: str) -> None:
+    """Carga imagen desde /tmp o assets/ si session state está vacío."""
+    if st.session_state[state_key] is not None:
+        return
+    for path in (_BG_TMP[slug], _BG_ASSETS[slug]):
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                st.session_state[state_key] = f.read()
+            return
+
+def _save_bg(slug: str, data: bytes) -> None:
+    """Guarda imagen en /tmp para persistir entre sesiones."""
+    try:
+        with open(_BG_TMP[slug], "wb") as f:
+            f.write(data)
+    except Exception:
+        pass  # Si falla no es crítico, ya está en session state
+
+_load_bg("ladrando-ideas", "bg_ladrando")
+_load_bg("ftbp", "bg_ftbp")
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -232,37 +265,41 @@ with st.sidebar:
 
     # Imágenes de fondo por podcast
     st.subheader("🖼️ Imágenes de fondo")
-    st.caption("Se guardan durante la sesión — no necesitas subirlas cada vez.")
+    st.caption("Se guardan automáticamente. Solo súbelas una vez.")
 
     col_a, col_b = st.columns(2)
 
     with col_a:
         st.markdown("**Ladrando Ideas**")
+        if st.session_state.bg_ladrando:
+            st.image(st.session_state.bg_ladrando, use_container_width=True)
         img_ladrando = st.file_uploader(
-            "Imagen LI",
+            "Cambiar imagen LI" if st.session_state.bg_ladrando else "Subir imagen LI",
             type=["jpg", "jpeg", "png"],
             key="upload_bg_ladrando",
             label_visibility="collapsed",
         )
         if img_ladrando:
-            st.session_state.bg_ladrando = img_ladrando.getvalue()
-            st.image(st.session_state.bg_ladrando, use_container_width=True)
-        elif st.session_state.bg_ladrando:
-            st.image(st.session_state.bg_ladrando, use_container_width=True)
+            data = img_ladrando.getvalue()
+            st.session_state.bg_ladrando = data
+            _save_bg("ladrando-ideas", data)
+            st.rerun()
 
     with col_b:
         st.markdown("**FTBP**")
+        if st.session_state.bg_ftbp:
+            st.image(st.session_state.bg_ftbp, use_container_width=True)
         img_ftbp = st.file_uploader(
-            "Imagen FTBP",
+            "Cambiar imagen FTBP" if st.session_state.bg_ftbp else "Subir imagen FTBP",
             type=["jpg", "jpeg", "png"],
             key="upload_bg_ftbp",
             label_visibility="collapsed",
         )
         if img_ftbp:
-            st.session_state.bg_ftbp = img_ftbp.getvalue()
-            st.image(st.session_state.bg_ftbp, use_container_width=True)
-        elif st.session_state.bg_ftbp:
-            st.image(st.session_state.bg_ftbp, use_container_width=True)
+            data = img_ftbp.getvalue()
+            st.session_state.bg_ftbp = data
+            _save_bg("ftbp", data)
+            st.rerun()
 
     st.markdown("---")
 
