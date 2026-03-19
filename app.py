@@ -241,31 +241,35 @@ def _save_bg(slug: str, data: bytes) -> None:
     with open(_BG_PATHS[slug], "wb") as f:
         f.write(data)
 
-def _load_episode_state() -> None:
-    """Carga temporada y episodio guardados de la sesión anterior."""
+def _load_all_episode_states() -> dict:
+    """Retorna el dict completo de estados guardados {slug: {season, episode}}."""
     if os.path.exists(_EP_STATE_PATH):
         try:
             import json as _json
             with open(_EP_STATE_PATH) as f:
-                saved = _json.load(f)
-            if st.session_state.season_number == 1:
-                st.session_state.season_number = saved.get("season", 1)
-            if st.session_state.episode_number == 1:
-                st.session_state.episode_number = saved.get("episode", 1)
+                return _json.load(f)
         except Exception:
             pass
+    return {}
 
-def _save_episode_state(season: int, episode: int) -> None:
+def _save_episode_state(slug: str, season: int, episode: int) -> None:
     try:
         import json as _json
+        states = _load_all_episode_states()
+        states[slug] = {"season": season, "episode": episode}
         with open(_EP_STATE_PATH, "w") as f:
-            _json.dump({"season": season, "episode": episode}, f)
+            _json.dump(states, f)
     except Exception:
         pass
 
+def _get_episode_defaults(slug: str) -> tuple:
+    """Retorna (season, episode) guardados para ese podcast, o (1, 1) si no hay."""
+    states = _load_all_episode_states()
+    saved = states.get(slug, {})
+    return saved.get("season", 1), saved.get("episode", 1)
+
 _load_bg("ladrando-ideas", "bg_ladrando")
 _load_bg("ftbp", "bg_ftbp")
-_load_episode_state()
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -321,25 +325,27 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Temporada y episodio
+    # Temporada y episodio — valores por podcast
+    _default_season, _default_episode = _get_episode_defaults(podcast_slug)
+
     col_ep1, col_ep2 = st.columns(2)
     season_number = col_ep1.number_input(
         "Temporada",
         min_value=1,
         max_value=99,
-        value=st.session_state.get("season_number", 1),
+        value=_default_season,
         step=1,
+        key=f"season_{podcast_slug}",
     )
     episode_number = col_ep2.number_input(
         "Episodio",
         min_value=1,
         max_value=999,
-        value=st.session_state.episode_number,
+        value=_default_episode,
         step=1,
+        key=f"episode_{podcast_slug}",
     )
-    st.session_state.season_number  = season_number
-    st.session_state.episode_number = episode_number
-    _save_episode_state(season_number, episode_number)
+    _save_episode_state(podcast_slug, season_number, episode_number)
 
     st.markdown("---")
     st.caption(
