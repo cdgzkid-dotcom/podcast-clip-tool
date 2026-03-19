@@ -75,12 +75,13 @@ VIDEO_CRF = 18                   # calidad de compresión (menor = mejor calidad
 VIDEO_PRESET = "fast"            # velocidad de encoding en Streamlit Cloud
 
 # ── Normalización de audio ───────────────────────────────────────────────────
-# dynaudnorm: iguala volúmenes entre locutor callado y locutor normal (por frame)
-#   f=300  → ventana de 300ms para detectar cambios de volumen (suaviza sin cortar sílabas)
-#   g=5    → suavizado gaussiano — evita saltos bruscos de ganancia
-#   m=10   → ganancia mínima ×10 (evita amplificar el silencio de fondo)
+# speechnorm: detecta segmentos de habla y solo normaliza esos, dejando la
+#   música e intros relativamente sin tocar (diseñado para podcasts).
+#   p=0.95 → pico objetivo (95% del máximo)
+#   e=30   → qué tan agresivo es el boost en habla callada
+#   r=0.0001 → umbral para distinguir habla de silencio/música
 # loudnorm: lleva el nivel final a estándar de redes sociales (-16 LUFS)
-AUDIO_NORMALIZE_FILTER = "dynaudnorm=f=300:g=5:m=10,loudnorm=I=-16:TP=-1.5:LRA=11"
+AUDIO_NORMALIZE_FILTER = "speechnorm=p=0.95:e=30:r=0.0001,loudnorm=I=-16:TP=-1.5:LRA=11"
 
 # ── Audio para Whisper ───────────────────────────────────────────────────────
 AUDIO_SAMPLE_RATE = 16000

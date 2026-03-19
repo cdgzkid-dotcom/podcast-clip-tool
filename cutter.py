@@ -79,7 +79,7 @@ def cut_audio(input_path: str, start_sec: float, end_sec: float, output_path: st
         "-ss", str(start_sec),
         "-to", str(end_sec),
         "-i", input_path,
-        "-c:a", AUDIO_CODEC,
+        "-codec:a", "libmp3lame",   # MP3 requiere libmp3lame, no aac
         "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         output_path,
