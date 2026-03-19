@@ -13,6 +13,7 @@ import tempfile
 from config import (
     AUDIO_CODEC,
     AUDIO_NORMALIZE_FILTER,
+    SUBTITLE_FONTS_DIR,
     TARGET_HEIGHT,
     TARGET_WIDTH,
     VIDEO_CODEC,
@@ -73,14 +74,20 @@ def cut_audio(input_path: str, start_sec: float, end_sec: float, output_path: st
     Raises:
         RuntimeError: si ffmpeg falla
     """
+    ext = os.path.splitext(output_path)[1].lower()
+    if ext == ".wav":
+        # PCM sin encoder delay — timing perfecto para sincronía de subtítulos
+        codec_args = ["-c:a", "pcm_s16le"]
+    else:
+        codec_args = ["-c:a", "libmp3lame", "-b:a", "192k"]
+
     cmd = [
-        "ffmpeg",
-        "-y",
+        "ffmpeg", "-y",
+        "-accurate_seek",
         "-ss", str(start_sec),
         "-to", str(end_sec),
         "-i", input_path,
-        "-codec:a", "libmp3lame",   # MP3 requiere libmp3lame, no aac
-        "-b:a", "192k",
+        *codec_args,
         "-avoid_negative_ts", "make_zero",
         output_path,
     ]
@@ -98,51 +105,50 @@ def create_video_from_audio(
     background_image_path: str,
     audio_path: str,
     output_path: str,
+    ass_path: str = None,
 ) -> str:
     """
-    Crea un video de Instagram Reels (1080×1920) a partir de:
-    - Una imagen de fondo estática (escalada/recortada para llenar el frame)
-    - Un audio de clip (MP3/AAC)
-
-    La imagen se escala para LLENAR completamente el frame 1080×1920
-    (puede recortar ligeramente si el aspect ratio no es 9:16 exacto).
+    Crea un video de Instagram Reels (1080×1920) quemando los subtítulos
+    en la misma pasada de ffmpeg — una sola codificación, más rápido.
 
     Args:
         background_image_path: ruta a la imagen de fondo (JPG o PNG)
-        audio_path:            ruta al audio del clip (MP3 o AAC)
+        audio_path:            ruta al audio del clip
         output_path:           ruta de destino del video MP4
-
-    Returns:
-        output_path si éxito
-
-    Raises:
-        RuntimeError: si ffmpeg falla
+        ass_path:              ruta al archivo .ass (opcional, quema subs en el mismo pass)
     """
-    # Escalar para que quepa completa dentro de 1080×1920, sin recortar.
-    # Si la imagen no es exactamente 9:16, se agregan barras negras (arriba/abajo
-    # o lados) para completar el frame — nunca se corta contenido de la imagen.
     scale_filter = (
         f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
         f"force_original_aspect_ratio=decrease,"
         f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black"
     )
 
+    if ass_path:
+        import os as _os
+        safe_ass = ass_path.replace("\\", "/").replace(":", "\\:")
+        if _os.path.isdir(SUBTITLE_FONTS_DIR):
+            safe_fonts = SUBTITLE_FONTS_DIR.replace(":", "\\:")
+            vf = f"{scale_filter},ass={safe_ass}:fontsdir={safe_fonts}"
+        else:
+            vf = f"{scale_filter},ass={safe_ass}"
+    else:
+        vf = scale_filter
+
     cmd = [
-        "ffmpeg",
-        "-y",
-        "-loop", "1",           # repetir imagen indefinidamente
-        "-framerate", "1",      # 1 fps suficiente para imagen estática
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-framerate", "1",
         "-i", background_image_path,
         "-i", audio_path,
-        "-vf", scale_filter,
+        "-vf", vf,
         "-c:v", VIDEO_CODEC,
-        "-tune", "stillimage",  # optimiza para imagen estática
+        "-tune", "stillimage",
         "-crf", str(VIDEO_CRF),
         "-preset", VIDEO_PRESET,
         "-c:a", AUDIO_CODEC,
         "-b:a", "192k",
-        "-pix_fmt", "yuv420p",  # compatibilidad máxima
-        "-shortest",            # terminar cuando el audio termine
+        "-pix_fmt", "yuv420p",
+        "-shortest",
         output_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -161,31 +167,28 @@ def process_clip(
     end_sec: float,
     background_image_path: str,
     output_video_path: str,
+    ass_path: str = None,
 ) -> str:
     """
-    Pipeline completo para un clip:
-    1. Cortar segmento de audio
-    2. Crear video con imagen de fondo + audio cortado
-
-    El quemado de subtítulos se hace DESPUÉS en app.py con burn_subtitles().
+    Pipeline completo para un clip en una sola pasada de ffmpeg:
+    1. Corta audio a WAV (sin encoder delay → timing perfecto)
+    2. Crea video + quema subtítulos en el mismo comando
 
     Args:
         audio_input_path:      audio original del episodio
         start_sec:             inicio del clip en segundos
         end_sec:               fin del clip en segundos
         background_image_path: imagen de fondo para el video
-        output_video_path:     destino del video sin subtítulos
-
-    Returns:
-        output_video_path
+        output_video_path:     destino del video final
+        ass_path:              archivo .ass para quemar subs (opcional)
     """
-    suffix = os.path.splitext(audio_input_path)[1] or ".mp3"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+    # WAV: sin encoder delay, timing perfecto para sincronía de subtítulos
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_audio_path = tmp.name
 
     try:
         cut_audio(audio_input_path, start_sec, end_sec, tmp_audio_path)
-        create_video_from_audio(background_image_path, tmp_audio_path, output_video_path)
+        create_video_from_audio(background_image_path, tmp_audio_path, output_video_path, ass_path)
     finally:
         if os.path.exists(tmp_audio_path):
             os.unlink(tmp_audio_path)

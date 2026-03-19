@@ -34,13 +34,16 @@ adicional antes o después del JSON."""
 _VIRAL_USER_TEMPLATE = """Analiza este transcript del episodio {episode_number} del
 podcast "{podcast_name}" y encuentra los 3 mejores momentos para clips de Instagram Reels.
 
-RESTRICCIONES CRÍTICAS:
-- Cada clip debe durar exactamente alrededor de {target_duration} segundos
-  (entre {min_duration}s y {max_duration}s es aceptable)
-- El inicio DEBE coincidir con el comienzo de una oración — jamás a mitad de palabra
-- El fin DEBE coincidir con el final completo de una oración — jamás cortando
-- Los momentos deben ser autocontenidos (comprensibles sin contexto extra)
-- Usa los timestamps [MM:SS] del transcript para calcular duraciones
+RESTRICCIONES — LEE CON ATENCIÓN:
+- La duración de cada clip DEBE ser entre {min_duration}s y {max_duration}s. NI UN SEGUNDO MÁS.
+- Antes de escribir el JSON, calcula: end_time - start_time. Si el resultado supera {max_duration},
+  ajusta el end_time para que la diferencia sea exactamente {target_duration}s.
+- Los timestamps son en segundos decimales (no MM:SS). Convierte los [MM:SS] del transcript
+  multiplicando minutos × 60 y sumando segundos.
+- El inicio DEBE coincidir con el comienzo de una oración completa.
+- El fin DEBE coincidir con el final de una oración completa.
+- Los momentos pueden venir de CUALQUIER parte del episodio, no solo del inicio.
+- Busca en todo el transcript y elige los más virales, aunque estén al final.
 
 TRANSCRIPT (formato [MM:SS] texto):
 {transcript}
@@ -201,6 +204,62 @@ def generate_instagram_caption(
         raise RuntimeError(f"Error al llamar a la Claude API: {e}") from e
 
     return response.content[0].text.strip()
+
+
+def generate_episode_description(
+    transcript_text: str,
+    episode_title: str,
+    podcast_name: str,
+    season_number: int,
+    episode_number: int,
+) -> dict:
+    """
+    Genera título final y descripción para Spotify a partir del transcript completo.
+
+    Returns:
+        {"title": str, "description": str}
+    """
+    client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
+
+    prompt = f"""Eres el productor del podcast "{podcast_name}".
+Con base en la transcripción completa del episodio, genera:
+1. Un título atractivo para el episodio (si el usuario ya propuso uno, mejóralo o úsalo tal cual)
+2. Una descripción para Spotify
+
+TÍTULO PROPUESTO POR EL HOST: {episode_title}
+TEMPORADA: {season_number} | EPISODIO: {episode_number}
+
+REQUISITOS DE LA DESCRIPCIÓN:
+- 3 a 5 oraciones, tono natural y conversacional
+- Resume los temas principales que se discutieron
+- No seas dramático ni uses frases de hype como "¡Imprescindible!" o "¡No te lo pierdas!"
+- Menciona los temas concretos que se trataron
+- Termina con una oración que invite a escuchar sin ser cursi
+
+TRANSCRIPT COMPLETO:
+{transcript_text[:80000]}
+
+Responde ÚNICAMENTE con JSON válido:
+{{
+  "title": "Título del episodio",
+  "description": "Descripción para Spotify..."
+}}"""
+
+    try:
+        response = client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIError as e:
+        raise RuntimeError(f"Error al llamar a la Claude API: {e}") from e
+
+    raw = _extract_json_block(response.content[0].text.strip())
+    try:
+        data = json.loads(raw)
+        return {"title": data.get("title", ""), "description": data.get("description", "")}
+    except json.JSONDecodeError:
+        return {"title": episode_title, "description": response.content[0].text.strip()}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

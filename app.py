@@ -35,8 +35,8 @@ from config import (
 )
 from cutter import normalize_audio, process_clip
 from transcriber import transcribe, format_for_claude, get_words_in_range, get_text_in_range, snap_to_word_boundaries
-from subtitles import generate_word_ass, words_to_srt, burn_subtitles
-from ai_agent import detect_viral_moments, generate_instagram_caption
+from subtitles import generate_word_ass, words_to_srt
+from ai_agent import detect_viral_moments, generate_instagram_caption, generate_episode_description
 from exporter import package_clip_output
 
 
@@ -117,28 +117,26 @@ def _process_single_clip(
       cut audio → create video → subtitles → burn → caption → package
     """
     base = f"clip_{clip_index:02d}_ep{episode_number:02d}"
-    video_no_subs = os.path.join(temp_dir, f"{base}_raw{OUTPUT_VIDEO_EXT}")
-    ass_path      = os.path.join(temp_dir, f"{base}.ass")
-    srt_path      = os.path.join(temp_dir, f"{base}{OUTPUT_SUBTITLE_EXT}")
-    final_video   = os.path.join(temp_dir, f"{base}_final{OUTPUT_VIDEO_EXT}")
+    ass_path  = os.path.join(temp_dir, f"{base}.ass")
+    srt_path  = os.path.join(temp_dir, f"{base}{OUTPUT_SUBTITLE_EXT}")
+    final_video = os.path.join(temp_dir, f"{base}_final{OUTPUT_VIDEO_EXT}")
 
-    # 1. Cortar audio + crear video con imagen de fondo
-    process_clip(audio_path, start_sec, end_sec, background_image_path, video_no_subs)
-
-    # 2. Obtener palabras del clip desde el transcript completo
+    # 1. Obtener palabras del clip desde el transcript completo
     words = get_words_in_range(transcription, start_sec, end_sec)
     clip_text = get_text_in_range(transcription, start_sec, end_sec)
 
-    # 3. Generar subtítulos
+    # 2. Generar subtítulos PRIMERO (se pasan a process_clip para quemarlos
+    #    en la misma pasada de ffmpeg — ahorra una codificación completa)
     if words:
         generate_word_ass(words, ass_path)
         words_to_srt(words, srt_path)
-        burn_subtitles(video_no_subs, ass_path, final_video)
     else:
-        # Sin palabras → video sin subtítulos
-        final_video = video_no_subs
+        ass_path = None
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write("")
+
+    # 3. Crear video + quemar subs en un solo paso
+    process_clip(audio_path, start_sec, end_sec, background_image_path, final_video, ass_path)
 
     # 4. Generar caption Instagram
     podcast_display = PODCASTS[podcast_slug]["display_name"]
@@ -205,16 +203,17 @@ st.title(APP_TITLE)
 # ── Inicialización de session state ──────────────────────────────────────────
 
 for key, default in {
-    "audio_path":         None,
-    "audio_filename":     None,
-    "normalized_bytes":   None,
-    "transcription":      None,
-    "viral_moments":      None,
-    "clips_ready":        [],
-    "episode_number":     1,
-    "season_number":      1,
-    "bg_ladrando":        None,
-    "bg_ftbp":            None,
+    "audio_path":           None,
+    "audio_filename":       None,
+    "normalized_bytes":     None,
+    "transcription":        None,
+    "viral_moments":        None,
+    "clips_ready":          [],
+    "episode_number":       1,
+    "season_number":        1,
+    "bg_ladrando":          None,
+    "bg_ftbp":              None,
+    "episode_description":  None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -430,6 +429,51 @@ if st.session_state.audio_path and bg_bytes:
             except Exception as e:
                 st.error(f"Error al detectar momentos virales: {e}")
                 st.stop()
+
+
+# ── Transcript completo + descripción Spotify ─────────────────────────────────
+
+if st.session_state.transcription:
+    st.divider()
+    st.subheader("📄 Transcript y descripción del episodio")
+
+    # Descarga del transcript completo
+    full_text = st.session_state.transcription.get("text", "")
+    if full_text:
+        st.download_button(
+            label="⬇️ Descargar transcript completo (.txt)",
+            data=full_text,
+            file_name=f"transcript_s{season_number:02d}e{episode_number:02d}.txt",
+            mime="text/plain",
+            key="dl_transcript_full",
+        )
+
+    # Generador de descripción para Spotify
+    with st.expander("🎧 Generar título y descripción para Spotify", expanded=False):
+        episode_title_input = st.text_input(
+            "Título del episodio (puedes dejar tu propuesta o dejarlo vacío)",
+            placeholder="Ej: Cómo fracasar bien y aprender de ello",
+            key="episode_title_input",
+        )
+        if st.button("✍️ Generar descripción", key="btn_spotify_desc"):
+            transcript_text_full = format_for_claude(st.session_state.transcription)
+            with st.spinner("Generando descripción con Claude..."):
+                try:
+                    result = generate_episode_description(
+                        transcript_text=transcript_text_full,
+                        episode_title=episode_title_input or "Sin título",
+                        podcast_name=podcast_display,
+                        season_number=season_number,
+                        episode_number=episode_number,
+                    )
+                    st.session_state.episode_description = result
+                except Exception as e:
+                    st.error(f"Error al generar descripción: {e}")
+
+        if st.session_state.episode_description:
+            d = st.session_state.episode_description
+            st.markdown(f"**Título:** {d['title']}")
+            st.text_area("Descripción para Spotify", value=d["description"], height=180, key="spotify_desc_output")
 
 
 # ── Mostrar momentos y generar clips ─────────────────────────────────────────

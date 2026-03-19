@@ -56,13 +56,14 @@ MAX_VIRAL_MOMENTS = 3
 
 # ── Subtítulos estilo Instagram Reels ────────────────────────────────────────
 SUBTITLE_FONT_NAME = "Roboto"    # Google Fonts — instalado via packages.txt
-SUBTITLE_FONT_SIZE = 88          # pt — grande y legible en mobile
+SUBTITLE_FONTS_DIR = "/usr/share/fonts/truetype/roboto"  # ruta Debian post-install
+SUBTITLE_FONT_SIZE = 96          # pt — grande y legible en mobile
 SUBTITLE_FONT_COLOR = "&H00FFFFFF"     # Blanco (ASS: AABBGGRR)
 SUBTITLE_OUTLINE_COLOR = "&H00000000" # Negro
-SUBTITLE_OUTLINE_WIDTH = 6       # px — outline grueso, sin shadow para máxima nitidez
+SUBTITLE_OUTLINE_WIDTH = 7       # px — outline grueso para máxima nitidez
 SUBTITLE_BOLD = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom (estándar ASS)
-SUBTITLE_MARGIN_V = 80           # margen vertical desde el borde inferior
+SUBTITLE_MARGIN_V = 480          # px desde borde inferior — encima de la barra negra
 SUBTITLE_WORDS_PER_LINE = 4      # palabras por línea
 
 # ── Video ────────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ TARGET_HEIGHT = 1920
 VIDEO_CODEC = "libx264"
 AUDIO_CODEC = "aac"
 VIDEO_CRF = 18                   # calidad de compresión (menor = mejor calidad)
-VIDEO_PRESET = "fast"            # velocidad de encoding en Streamlit Cloud
+VIDEO_PRESET = "ultrafast"       # velocidad de encoding — sin diferencia visual en imagen estática
 
 # ── Normalización de audio ───────────────────────────────────────────────────
 # speechnorm: detecta segmentos de habla y solo normaliza esos, dejando la

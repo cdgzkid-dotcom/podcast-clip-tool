@@ -29,6 +29,9 @@ from config import (
     VIDEO_PRESET,
 )
 
+# Color amarillo para relleno karaoke (ASS: AABBGGRR)
+_KARAOKE_FILL_COLOR = "&H0000FFFF"
+
 # ── Plantilla ASS ─────────────────────────────────────────────────────────────
 # PlayResX/Y = resolución de referencia para el posicionado de subtítulos.
 # Usamos 1080x1920 (9:16 estándar TikTok). Si el video tiene otra resolución,
@@ -42,7 +45,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{fontname},{fontsize},{primary},{primary},{outline},{back},{bold},0,0,0,100,100,0,0,1,{outline_w},0,{alignment},10,10,{margin_v},1
+Style: Default,{fontname},{fontsize},{primary},{secondary},{outline},{back},{bold},0,0,0,100,100,0,0,1,{outline_w},0,{alignment},10,10,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -100,7 +103,8 @@ def generate_word_ass(words: list, output_path: str) -> str:
     header = _ASS_HEADER.format(
         fontname=SUBTITLE_FONT_NAME,
         fontsize=SUBTITLE_FONT_SIZE,
-        primary=SUBTITLE_FONT_COLOR,
+        primary=SUBTITLE_FONT_COLOR,      # blanco — color base de todas las palabras
+        secondary=_KARAOKE_FILL_COLOR,    # amarillo — relleno \kf de la palabra activa
         outline=SUBTITLE_OUTLINE_COLOR,
         back="&H00000000",
         bold=SUBTITLE_BOLD,
@@ -120,14 +124,24 @@ def generate_word_ass(words: list, output_path: str) -> str:
         line_start = _seconds_to_ass_time(line_words[0]["start"])
         line_end   = _seconds_to_ass_time(line_words[-1]["end"] + 0.05)
 
-        line_text = " ".join(
-            w["word"].lower().replace("{", "\\{").replace("}", "\\}")
-            for w in line_words
-        )
+        # \kf{cs}: la palabra se rellena de secundario→primario en cs centisegundos
+        # Todas las palabras de la línea visibles desde el inicio (blanco)
+        # La activa se ilumina de amarillo conforme el audio avanza
+        parts = []
+        for i, w in enumerate(line_words):
+            duration_sec = (
+                line_words[i + 1]["start"] - w["start"]
+                if i < len(line_words) - 1
+                else w["end"] - w["start"]
+            )
+            cs = max(1, int(duration_sec * 100))
+            text = w["word"].lower().replace("{", "\\{").replace("}", "\\}")
+            parts.append(f"{{\\kf{cs}}}{text}")
+
         events.append(_ASS_DIALOGUE.format(
             start=line_start,
             end=line_end,
-            text=line_text,
+            text=" ".join(parts),
         ))
 
     with open(output_path, "w", encoding="utf-8") as f:
