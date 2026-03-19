@@ -55,15 +55,15 @@ CLIP_DURATION_TOLERANCE = 5      # ±segundos aceptables por corte natural
 MAX_VIRAL_MOMENTS = 3
 
 # ── Subtítulos estilo Instagram Reels ────────────────────────────────────────
+SUBTITLE_FONT_NAME = "Roboto"    # Google Fonts — instalado via packages.txt
 SUBTITLE_FONT_SIZE = 88          # pt — grande y legible en mobile
-SUBTITLE_FONT_COLOR = "&H00FFFFFF"       # Blanco (ASS: AABBGGRR) — palabras futuras
-SUBTITLE_SECONDARY_COLOR = "&H0000FFFF" # Amarillo — relleno karaoke \kf
-SUBTITLE_OUTLINE_COLOR = "&H00000000"   # Negro
-SUBTITLE_OUTLINE_WIDTH = 4       # px
+SUBTITLE_FONT_COLOR = "&H00FFFFFF"     # Blanco (ASS: AABBGGRR)
+SUBTITLE_OUTLINE_COLOR = "&H00000000" # Negro
+SUBTITLE_OUTLINE_WIDTH = 5       # px — outline más grueso para mejor legibilidad
 SUBTITLE_BOLD = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom (estándar ASS)
 SUBTITLE_MARGIN_V = 80           # margen vertical desde el borde inferior
-SUBTITLE_WORDS_PER_LINE = 5      # palabras por línea en el karaoke
+SUBTITLE_WORDS_PER_LINE = 4      # palabras por línea
 
 # ── Video ────────────────────────────────────────────────────────────────────
 TARGET_ASPECT = "9:16"

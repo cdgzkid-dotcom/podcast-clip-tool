@@ -18,11 +18,11 @@ from config import (
     SUBTITLE_ALIGNMENT,
     SUBTITLE_BOLD,
     SUBTITLE_FONT_COLOR,
+    SUBTITLE_FONT_NAME,
     SUBTITLE_FONT_SIZE,
     SUBTITLE_MARGIN_V,
     SUBTITLE_OUTLINE_COLOR,
     SUBTITLE_OUTLINE_WIDTH,
-    SUBTITLE_SECONDARY_COLOR,
     SUBTITLE_WORDS_PER_LINE,
     VIDEO_CODEC,
     VIDEO_CRF,
@@ -42,7 +42,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,{fontsize},{primary},{secondary},{outline},{back},{bold},0,0,0,100,100,0,0,1,{outline_w},0,{alignment},10,10,{margin_v},1
+Style: Default,{fontname},{fontsize},{primary},{primary},{outline},{back},{bold},0,0,0,100,100,0,0,1,{outline_w},2,{alignment},10,10,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -97,11 +97,10 @@ def generate_word_ass(words: list, output_path: str) -> str:
     if not words:
         raise ValueError("La lista de palabras está vacía. ¿El transcript falló?")
 
-    # Header con SecondaryColour = amarillo para el efecto \kf
     header = _ASS_HEADER.format(
+        fontname=SUBTITLE_FONT_NAME,
         fontsize=SUBTITLE_FONT_SIZE,
-        primary=SUBTITLE_FONT_COLOR,        # blanco — palabras futuras
-        secondary=SUBTITLE_SECONDARY_COLOR,  # amarillo — relleno karaoke
+        primary=SUBTITLE_FONT_COLOR,
         outline=SUBTITLE_OUTLINE_COLOR,
         back="&H00000000",
         bold=SUBTITLE_BOLD,
@@ -110,7 +109,6 @@ def generate_word_ass(words: list, output_path: str) -> str:
         margin_v=SUBTITLE_MARGIN_V,
     )
 
-    # Agrupar palabras en líneas de N palabras
     n = SUBTITLE_WORDS_PER_LINE
     lines = [words[i : i + n] for i in range(0, len(words), n)]
 
@@ -119,27 +117,13 @@ def generate_word_ass(words: list, output_path: str) -> str:
         if not line_words:
             continue
 
-        # Tiempo de inicio y fin de la línea completa
         line_start = _seconds_to_ass_time(line_words[0]["start"])
         line_end   = _seconds_to_ass_time(line_words[-1]["end"] + 0.05)
 
-        # Construir texto con tags \kf por cada palabra
-        # \kf{cs}: karaoke fill — la palabra se "llena" de amarillo en cs centisegundos
-        parts = []
-        for i, w in enumerate(line_words):
-            # Duración de esta palabra en centisegundos
-            if i < len(line_words) - 1:
-                # De inicio de esta palabra a inicio de la siguiente
-                duration_sec = line_words[i + 1]["start"] - w["start"]
-            else:
-                # Última palabra: de su inicio a su fin
-                duration_sec = w["end"] - w["start"]
-
-            cs = max(1, int(duration_sec * 100))
-            text = w["word"].upper().replace("{", "\\{").replace("}", "\\}")
-            parts.append(f"{{\\kf{cs}}}{text}")
-
-        line_text = " ".join(parts)
+        line_text = " ".join(
+            w["word"].lower().replace("{", "\\{").replace("}", "\\}")
+            for w in line_words
+        )
         events.append(_ASS_DIALOGUE.format(
             start=line_start,
             end=line_end,
@@ -179,7 +163,7 @@ def words_to_srt(words: list, output_path: str) -> str:
     for idx, group in enumerate(groups, start=1):
         start = _seconds_to_srt_time(group[0]["start"])
         end   = _seconds_to_srt_time(group[-1]["end"] + 0.05)
-        text  = " ".join(w["word"].upper() for w in group)
+        text  = " ".join(w["word"].lower() for w in group)
         cues.append(f"{idx}\n{start} --> {end}\n{text}\n")
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -204,7 +188,7 @@ def segments_to_srt(segments: list, output_path: str) -> str:
     for i, seg in enumerate(segments, start=1):
         start = _seconds_to_srt_time(seg["start"])
         end = _seconds_to_srt_time(seg["end"])
-        text = seg["text"].strip().upper()
+        text = seg["text"].strip().lower()
         lines.append(f"{i}\n{start} --> {end}\n{text}\n")
 
     with open(output_path, "w", encoding="utf-8") as f:
