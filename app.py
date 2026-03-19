@@ -24,6 +24,10 @@ from config import (
     APP_TITLE,
     CLIP_DURATION_SECONDS,
     CLIP_DURATION_TOLERANCE,
+    LINKEDIN_WIDTH,
+    LINKEDIN_HEIGHT,
+    SUBTITLE_LINKEDIN_FONT_SIZE,
+    SUBTITLE_LINKEDIN_MARGIN_V,
     MAX_UPLOAD_MB,
     MAX_VIRAL_MOMENTS,
     OUTPUT_SUBTITLE_EXT,
@@ -33,14 +37,14 @@ from config import (
     SUPPORTED_AUDIO_FORMATS,
     WHISPER_LANGUAGE,
 )
-from cutter import normalize_audio, process_clip
+from cutter import normalize_audio, cut_audio, create_video_from_audio
 from transcriber import transcribe, format_for_claude, get_words_in_range, get_text_in_range, snap_to_word_boundaries
 from subtitles import generate_word_ass, words_to_srt
 from ai_agent import (
     detect_viral_moments,
     generate_instagram_caption,
     generate_episode_description,
-    generate_linkedin_post,
+    generate_linkedin_clip_copy,
 )
 from exporter import package_clip_output
 
@@ -118,67 +122,116 @@ def _process_single_clip(
     temp_dir: str,
 ) -> dict:
     """
-    Pipeline completo para un clip:
-      cut audio → create video → subtitles → burn → caption → package
+    Pipeline completo para un clip — genera dos videos:
+      - Instagram (1080×1920 vertical)
+      - LinkedIn  (1080×1080 cuadrado)
+    Corta el audio UNA sola vez (WAV, sin encoder delay) y lo reutiliza.
     """
-    base = f"clip_{clip_index:02d}_ep{episode_number:02d}"
-    ass_path  = os.path.join(temp_dir, f"{base}.ass")
-    srt_path  = os.path.join(temp_dir, f"{base}{OUTPUT_SUBTITLE_EXT}")
-    final_video = os.path.join(temp_dir, f"{base}_final{OUTPUT_VIDEO_EXT}")
+    base           = f"clip_{clip_index:02d}_ep{episode_number:02d}"
+    tmp_wav        = os.path.join(temp_dir, f"{base}_audio.wav")
+    ass_ig_path    = os.path.join(temp_dir, f"{base}_ig.ass")
+    ass_li_path    = os.path.join(temp_dir, f"{base}_li.ass")
+    srt_path       = os.path.join(temp_dir, f"{base}{OUTPUT_SUBTITLE_EXT}")
+    video_ig       = os.path.join(temp_dir, f"{base}_instagram{OUTPUT_VIDEO_EXT}")
+    video_li       = os.path.join(temp_dir, f"{base}_linkedin{OUTPUT_VIDEO_EXT}")
 
-    # 1. Obtener palabras del clip desde el transcript completo
-    words = get_words_in_range(transcription, start_sec, end_sec)
+    # 1. Palabras y texto del clip
+    words     = get_words_in_range(transcription, start_sec, end_sec)
     clip_text = get_text_in_range(transcription, start_sec, end_sec)
 
-    # 2. Generar subtítulos PRIMERO (se pasan a process_clip para quemarlos
-    #    en la misma pasada de ffmpeg — ahorra una codificación completa)
+    # 2. Cortar audio UNA vez como WAV (sin encoder delay → timing perfecto)
+    cut_audio(audio_path, start_sec, end_sec, tmp_wav)
+
+    # 3. Generar ASS y SRT
     if words:
-        generate_word_ass(words, ass_path)
+        generate_word_ass(words, ass_ig_path)                          # 1080×1920
+        generate_word_ass(                                              # 1080×1080
+            words, ass_li_path,
+            play_res_x=LINKEDIN_WIDTH,
+            play_res_y=LINKEDIN_HEIGHT,
+            font_size=SUBTITLE_LINKEDIN_FONT_SIZE,
+            margin_v=SUBTITLE_LINKEDIN_MARGIN_V,
+        )
         words_to_srt(words, srt_path)
     else:
-        ass_path = None
+        ass_ig_path = ass_li_path = None
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write("")
 
-    # 3. Crear video + quemar subs en un solo paso
-    process_clip(audio_path, start_sec, end_sec, background_image_path, final_video, ass_path)
-
-    # 4. Generar caption Instagram
-    podcast_display = PODCASTS[podcast_slug]["display_name"]
-    instagram_caption = generate_instagram_caption(
-        clip_text, season_number, episode_number, podcast_display
+    # 4. Crear video Instagram (9:16) + video LinkedIn (1:1) en paralelo (secuencial)
+    create_video_from_audio(background_image_path, tmp_wav, video_ig, ass_ig_path)
+    create_video_from_audio(
+        background_image_path, tmp_wav, video_li, ass_li_path,
+        width=LINKEDIN_WIDTH, height=LINKEDIN_HEIGHT,
     )
 
-    # 5. Empaquetar para descarga
-    return package_clip_output(
+    # 5. Limpiar WAV temporal
+    if os.path.exists(tmp_wav):
+        os.unlink(tmp_wav)
+
+    # 6. Captions
+    podcast_display   = PODCASTS[podcast_slug]["display_name"]
+    instagram_caption = generate_instagram_caption(clip_text, season_number, episode_number, podcast_display)
+    linkedin_caption  = generate_linkedin_clip_copy(clip_text, season_number, episode_number, podcast_display)
+
+    # 7. Empaquetar resultado base (Instagram)
+    result = package_clip_output(
         clip_index=clip_index,
         season_number=season_number,
         episode_number=episode_number,
         podcast_slug=podcast_slug,
-        video_path=final_video,
+        video_path=video_ig,
         srt_path=srt_path,
         transcript_text=clip_text,
         instagram_caption=instagram_caption,
     )
 
+    # 8. Agregar assets de LinkedIn al resultado
+    with open(video_li, "rb") as f:
+        result["linkedin_video_bytes"] = f.read()
+    result["linkedin_caption"] = linkedin_caption
+    result["linkedin_filename"] = f"{result['filename_base']}_linkedin.mp4"
+
+    return result
+
 
 def _render_clip_result(result: dict, clip_number: int) -> None:
-    """Renderiza los resultados de un clip."""
-    st.subheader(f"Clip {clip_number} — `{result['filename_base']}`")
+    """Renderiza los resultados de un clip — Instagram (9:16) y LinkedIn (1:1)."""
+    st.subheader(f"Clip {clip_number}")
 
-    vid_col, _ = st.columns([1, 3])
-    with vid_col:
-        st.video(result["video_bytes"])
+    # ── Videos lado a lado ────────────────────────────────────────────────────
+    col_ig, col_li = st.columns(2)
 
-    col1, col2 = st.columns(2)
-    col1.download_button(
-        label="⬇️ Descargar MP4",
-        data=result["video_bytes"],
-        file_name=f"{result['filename_base']}.mp4",
-        mime="video/mp4",
-        key=f"dl_video_{clip_number}",
-    )
-    col2.download_button(
+    with col_ig:
+        st.caption("📱 Instagram Reels (9:16)")
+        vid_col, _ = st.columns([1, 2])
+        with vid_col:
+            st.video(result["video_bytes"])
+        st.download_button(
+            label="⬇️ Descargar Instagram MP4",
+            data=result["video_bytes"],
+            file_name=f"{result['filename_base']}.mp4",
+            mime="video/mp4",
+            key=f"dl_ig_{clip_number}",
+            use_container_width=True,
+        )
+
+    with col_li:
+        st.caption("💼 LinkedIn (1:1)")
+        vid_col2, _ = st.columns([1, 1])
+        with vid_col2:
+            st.video(result["linkedin_video_bytes"])
+        st.download_button(
+            label="⬇️ Descargar LinkedIn MP4",
+            data=result["linkedin_video_bytes"],
+            file_name=result["linkedin_filename"],
+            mime="video/mp4",
+            key=f"dl_li_{clip_number}",
+            use_container_width=True,
+        )
+
+    # ── Descarga SRT ─────────────────────────────────────────────────────────
+    st.download_button(
         label="⬇️ Descargar SRT",
         data=result["srt_bytes"],
         file_name=f"{result['filename_base']}.srt",
@@ -186,8 +239,14 @@ def _render_clip_result(result: dict, clip_number: int) -> None:
         key=f"dl_srt_{clip_number}",
     )
 
-    with st.expander("📸 Copy Instagram", expanded=True):
-        st.code(result["instagram_caption"], language=None)
+    # ── Copies ───────────────────────────────────────────────────────────────
+    col_copy1, col_copy2 = st.columns(2)
+    with col_copy1:
+        with st.expander("📸 Copy Instagram", expanded=True):
+            st.code(result["instagram_caption"], language=None)
+    with col_copy2:
+        with st.expander("💼 Copy LinkedIn", expanded=True):
+            st.code(result["linkedin_caption"], language=None)
 
     with st.expander("📝 Transcript del clip"):
         st.text(result["transcript"] or "(sin transcript disponible)")
@@ -219,7 +278,6 @@ for key, default in {
     "bg_ladrando":          None,
     "bg_ftbp":              None,
     "episode_description":  None,
-    "linkedin_content":     None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -511,54 +569,6 @@ if st.session_state.transcription:
         st.text_input("Título sugerido", value=d["title"], key="spotify_title_out")
         st.text_area("Descripción para Spotify", value=d["description"], height=160, key="spotify_desc_output")
 
-    # ── LinkedIn (solo FTBP) ──────────────────────────────────────────────────
-    if podcast_slug == "ftbp":
-        st.divider()
-        st.subheader("💼 Post de LinkedIn (FTBP)")
-        st.caption("Generado desde el transcript completo del episodio, en la voz de JC Rico.")
-
-        if st.button("🔗 Generar post de LinkedIn + imagen", key="btn_linkedin", type="secondary"):
-            transcript_text_full = st.session_state.transcription.get("text", "")
-            with st.spinner("Escribiendo post con Claude..."):
-                try:
-                    linkedin_content = generate_linkedin_post(
-                        transcript_text=transcript_text_full,
-                        season_number=season_number,
-                        episode_number=episode_number,
-                    )
-                    st.session_state.linkedin_content = linkedin_content
-                except Exception as e:
-                    st.error(f"Error al generar post de LinkedIn: {e}")
-
-        if st.session_state.linkedin_content:
-            lc = st.session_state.linkedin_content
-            st.text_area(
-                "Copy para LinkedIn",
-                value=lc["copy"],
-                height=280,
-                key="linkedin_copy_out",
-            )
-            st.download_button(
-                label="⬇️ Descargar copy (.txt)",
-                data=lc["copy"],
-                file_name=f"linkedin_s{season_number:02d}e{episode_number:02d}.txt",
-                mime="text/plain",
-                key="dl_linkedin_copy",
-            )
-
-            # Imagen = portada del podcast (ya subida en sidebar)
-            if st.session_state.bg_ftbp:
-                st.caption("🖼️ Imagen para el post:")
-                img_col, _ = st.columns([1, 2])
-                with img_col:
-                    st.image(st.session_state.bg_ftbp, use_container_width=True)
-                st.download_button(
-                    label="⬇️ Descargar imagen (portada FTBP)",
-                    data=st.session_state.bg_ftbp,
-                    file_name=f"linkedin_img_s{season_number:02d}e{episode_number:02d}.jpg",
-                    mime="image/jpeg",
-                    key="dl_linkedin_img",
-                )
 
 
 # ── Mostrar momentos y generar clips ─────────────────────────────────────────

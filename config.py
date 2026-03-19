@@ -70,6 +70,10 @@ SUBTITLE_WORDS_PER_LINE = 6      # palabras por línea
 TARGET_ASPECT = "9:16"
 TARGET_WIDTH = 1080              # resolución Instagram Reels estándar
 TARGET_HEIGHT = 1920
+LINKEDIN_WIDTH = 1080            # cuadrado para LinkedIn
+LINKEDIN_HEIGHT = 1080
+SUBTITLE_LINKEDIN_FONT_SIZE = 72
+SUBTITLE_LINKEDIN_MARGIN_V = 120
 VIDEO_CODEC = "libx264"
 AUDIO_CODEC = "aac"
 VIDEO_CRF = 18                   # calidad de compresión (menor = mejor calidad)

@@ -24,6 +24,8 @@ from config import (
     SUBTITLE_OUTLINE_COLOR,
     SUBTITLE_OUTLINE_WIDTH,
     SUBTITLE_WORDS_PER_LINE,
+    TARGET_WIDTH,
+    TARGET_HEIGHT,
     VIDEO_CODEC,
     VIDEO_CRF,
     VIDEO_PRESET,
@@ -39,8 +41,8 @@ _KARAOKE_FILL_COLOR = "&HFFFFFFFF"
 _ASS_HEADER = """\
 [Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: {play_res_x}
+PlayResY: {play_res_y}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
@@ -76,7 +78,14 @@ def _seconds_to_ass_time(seconds: float) -> str:
 
 # ── Generación de ASS (karaoke por líneas, estilo CapCut) ────────────────────
 
-def generate_word_ass(words: list, output_path: str) -> str:
+def generate_word_ass(
+    words: list,
+    output_path: str,
+    play_res_x: int = TARGET_WIDTH,
+    play_res_y: int = TARGET_HEIGHT,
+    font_size: int = SUBTITLE_FONT_SIZE,
+    margin_v: int = SUBTITLE_MARGIN_V,
+) -> str:
     """
     Genera un archivo ASS con karaoke por líneas.
 
@@ -101,16 +110,18 @@ def generate_word_ass(words: list, output_path: str) -> str:
         raise ValueError("La lista de palabras está vacía. ¿El transcript falló?")
 
     header = _ASS_HEADER.format(
+        play_res_x=play_res_x,
+        play_res_y=play_res_y,
         fontname=SUBTITLE_FONT_NAME,
-        fontsize=SUBTITLE_FONT_SIZE,
-        primary=SUBTITLE_FONT_COLOR,      # blanco — color base de todas las palabras
-        secondary=_KARAOKE_FILL_COLOR,    # amarillo — relleno \kf de la palabra activa
+        fontsize=font_size,
+        primary=SUBTITLE_FONT_COLOR,
+        secondary=_KARAOKE_FILL_COLOR,
         outline=SUBTITLE_OUTLINE_COLOR,
         back="&H00000000",
         bold=SUBTITLE_BOLD,
         outline_w=SUBTITLE_OUTLINE_WIDTH,
         alignment=SUBTITLE_ALIGNMENT,
-        margin_v=SUBTITLE_MARGIN_V,
+        margin_v=margin_v,
     )
 
     n = SUBTITLE_WORDS_PER_LINE

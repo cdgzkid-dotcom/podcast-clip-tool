@@ -106,6 +106,8 @@ def create_video_from_audio(
     audio_path: str,
     output_path: str,
     ass_path: str = None,
+    width: int = TARGET_WIDTH,
+    height: int = TARGET_HEIGHT,
 ) -> str:
     """
     Crea un video de Instagram Reels (1080×1920) quemando los subtítulos
@@ -118,9 +120,9 @@ def create_video_from_audio(
         ass_path:              ruta al archivo .ass (opcional, quema subs en el mismo pass)
     """
     scale_filter = (
-        f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
+        f"scale={width}:{height}:"
         f"force_original_aspect_ratio=decrease,"
-        f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"
     )
 
     if ass_path:

@@ -267,82 +267,72 @@ Responde ÚNICAMENTE con JSON válido, sin markdown:
         return {"title": episode_title, "description": response.content[0].text.strip()}
 
 
-_LINKEDIN_SYSTEM_PROMPT = """Eres el ghostwriter de JC Rico, co-host del podcast
-"Fuck The Business Plan". Escribes sus posts de LinkedIn en primera persona.
+_LINKEDIN_CLIP_SYSTEM = """Eres el ghostwriter de un podcast de negocios en español.
+Escribes posts de LinkedIn cortos y directos basados en un clip de podcast.
 
-Su voz: reflexiva, directa, con experiencia real de negocios. Usa párrafos cortos.
-Nada de frases vacías tipo "¡Imperdible!" o "¡No te lo pierdas!". Cero clichés
-motivacionales. El tono es el de un líder de ventas con 53+ proyectos globales
-que comparte lo que aprendió, no que vende humo.
+Voz: reflexiva, con experiencia real, párrafos cortos. Sin clichés motivacionales,
+sin frases vacías. El tono es el de un profesional que comparte aprendizajes reales."""
 
-Perfil: Líder de Ventas Fraccional | Revenue Ops y Prop-Tech | Mentor Internacional."""
+_LINKEDIN_CLIP_TEMPLATE = """Escribe un post de LinkedIn para acompañar este clip del
+podcast "{podcast_name}" — Temporada {season_number}, Episodio {episode_number}.
 
-_LINKEDIN_USER_TEMPLATE = """Acabo de grabar el episodio {season_number}x{episode_number}
-del podcast "Fuck The Business Plan". Léete la transcripción completa y escribe
-el post de LinkedIn para que yo (JC Rico) lo publique junto con el clip del episodio.
+TRANSCRIPT DEL CLIP:
+{clip_transcript}
 
-ESTRUCTURA OBLIGATORIA (sigue este orden exacto):
-1. Abre con UNA frase-gancho que sea una cita memorable o idea fuerte del episodio
-   (entre comillas si es cita textual, sin comillas si es paráfrasis)
-2. Presentación del invitado: quién es, qué hace, por qué importa (2-3 oraciones)
-3. Historia o contexto que haga al lector conectar (3-5 oraciones, personal, específico)
-4. Dos aprendizajes clave numerados (1- y 2-), concisos y accionables
-5. Cierre: una oración invitando a escuchar el episodio completo
-6. Pregunta de cierre para generar comentarios (genuina, relacionada al tema)
+ESTRUCTURA:
+1. Una frase-gancho fuerte (cita o idea del clip, máximo 2 líneas)
+2. Contexto o reflexión en 2-3 oraciones
+3. El aprendizaje o insight clave del clip
+4. Una pregunta corta de cierre para generar comentarios
 
 RESTRICCIONES:
-- Máximo 1,300 caracteres en total (límite de LinkedIn antes del "ver más")
+- Máximo 900 caracteres en total
 - Sin hashtags
-- Sin emojis excesivos (máximo 1-2 si son realmente útiles)
+- Sin emojis (o máximo 1)
 - Todo en español
-- Primera persona como JC Rico
+- Tono profesional pero humano
 
-TRANSCRIPT COMPLETO:
-{transcript}
-
-Responde ÚNICAMENTE con JSON válido, sin markdown:
-{{
-  "copy": "El post de LinkedIn aquí..."
-}}"""
+Responde solo con el texto del post, sin comillas, sin explicaciones."""
 
 
-def generate_linkedin_post(
-    transcript_text: str,
+def generate_linkedin_clip_copy(
+    clip_transcript: str,
     season_number: int,
     episode_number: int,
-) -> dict:
+    podcast_name: str,
+) -> str:
     """
-    Genera copy de LinkedIn + prompt para imagen a partir del transcript completo.
+    Genera copy de LinkedIn para un clip específico (no el episodio completo).
 
-    Solo aplica para FTBP (JC Rico). Usa el transcript completo del episodio.
+    Args:
+        clip_transcript: texto del clip
+        season_number:   número de temporada
+        episode_number:  número de episodio
+        podcast_name:    nombre del podcast
 
     Returns:
-        {"copy": str, "image_prompt": str}
+        Copy como string listo para copiar/pegar en LinkedIn
     """
     client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
 
-    user_message = _LINKEDIN_USER_TEMPLATE.format(
+    user_message = _LINKEDIN_CLIP_TEMPLATE.format(
+        podcast_name=podcast_name,
         season_number=season_number,
         episode_number=episode_number,
-        transcript=transcript_text[:120_000],
+        clip_transcript=clip_transcript,
     )
 
     try:
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=2048,
-            system=_LINKEDIN_SYSTEM_PROMPT,
+            max_tokens=512,
+            system=_LINKEDIN_CLIP_SYSTEM,
             messages=[{"role": "user", "content": user_message}],
         )
     except anthropic.APIError as e:
         raise RuntimeError(f"Error al llamar a la Claude API: {e}") from e
 
-    raw = _extract_json_block(response.content[0].text.strip())
-    try:
-        data = json.loads(raw)
-        return {"copy": data.get("copy", "")}
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Claude retornó JSON inválido: {e}\nRespuesta:\n{raw}") from e
+    return response.content[0].text.strip()
 
 
 def generate_linkedin_image(image_prompt: str) -> bytes:
