@@ -215,31 +215,30 @@ for key, default in {
     if key not in st.session_state:
         st.session_state[key] = default
 
-# Rutas fijas en /tmp para persistir imágenes entre sesiones (mismo contenedor)
-# y en assets/ del repo como backup permanente si el usuario las commitea.
-_BG_TMP = {
-    "ladrando-ideas": "/tmp/podcast_bg_ladrando.jpg",
-    "ftbp":           "/tmp/podcast_bg_ftbp.jpg",
-}
-_BG_ASSETS = {
-    "ladrando-ideas": "assets/bg_ladrando.jpg",
-    "ftbp":           "assets/bg_ftbp.jpg",
+# Directorio assets/ relativo al archivo app.py — persiste entre sesiones
+# mientras no haya un nuevo deploy (más confiable que /tmp en Streamlit Cloud).
+_APP_DIR    = os.path.dirname(os.path.abspath(__file__))
+_ASSETS_DIR = os.path.join(_APP_DIR, "assets")
+os.makedirs(_ASSETS_DIR, exist_ok=True)
+
+_BG_PATHS = {
+    "ladrando-ideas": os.path.join(_ASSETS_DIR, "bg_ladrando.jpg"),
+    "ftbp":           os.path.join(_ASSETS_DIR, "bg_ftbp.jpg"),
 }
 
 def _load_bg(slug: str, state_key: str) -> None:
-    """Carga imagen desde /tmp o assets/ si session state está vacío."""
+    """Carga imagen desde assets/ si session state está vacío."""
     if st.session_state[state_key] is not None:
         return
-    for path in (_BG_TMP[slug], _BG_ASSETS[slug]):
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                st.session_state[state_key] = f.read()
-            return
+    path = _BG_PATHS[slug]
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            st.session_state[state_key] = f.read()
 
 def _save_bg(slug: str, data: bytes) -> None:
-    """Guarda imagen en /tmp para persistir entre sesiones."""
+    """Guarda imagen en assets/ para persistir entre sesiones."""
     try:
-        with open(_BG_TMP[slug], "wb") as f:
+        with open(_BG_PATHS[slug], "wb") as f:
             f.write(data)
     except Exception:
         pass  # Si falla no es crítico, ya está en session state
@@ -283,7 +282,6 @@ with st.sidebar:
             data = img_ladrando.getvalue()
             st.session_state.bg_ladrando = data
             _save_bg("ladrando-ideas", data)
-            st.rerun()
 
     with col_b:
         st.markdown("**FTBP**")
@@ -299,7 +297,6 @@ with st.sidebar:
             data = img_ftbp.getvalue()
             st.session_state.bg_ftbp = data
             _save_bg("ftbp", data)
-            st.rerun()
 
     st.markdown("---")
 
