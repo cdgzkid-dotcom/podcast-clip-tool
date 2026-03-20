@@ -60,13 +60,17 @@ MAX_VIRAL_MOMENTS = 3
 SUBTITLE_FONT_NAME = "Roboto"    # Google Fonts — instalado via packages.txt
 SUBTITLE_FONTS_DIR = "/usr/share/fonts/truetype/roboto"  # ruta Debian post-install
 SUBTITLE_FONT_SIZE = 96          # pt — grande y legible en mobile
-SUBTITLE_FONT_COLOR = "&H00FFFFFF"     # Blanco (ASS: AABBGGRR)
-SUBTITLE_OUTLINE_COLOR = "&H00000000" # Negro
-SUBTITLE_OUTLINE_WIDTH = 0       # sin outline — texto blanco limpio
-SUBTITLE_BOLD = 1
-SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom (estándar ASS)
-SUBTITLE_MARGIN_V = 480          # px desde borde inferior — encima de la barra negra
-SUBTITLE_WORDS_PER_LINE = 7      # palabras por línea — acumula como CapCut
+# ASS usa formato AABBGGRR (no RRGGBBAA)
+# PrimaryColour   = palabra ACTIVA (hablándose ahora) → amarillo
+# SecondaryColour = palabras INACTIVAS del grupo (ya visibles, aún no dichas) → blanco
+SUBTITLE_FONT_COLOR      = "&H0000FFFF"   # Amarillo: palabra activa (R=FF,G=FF,B=00)
+SUBTITLE_SECONDARY_COLOR = "&H00FFFFFF"   # Blanco: palabras inactivas pero visibles
+SUBTITLE_OUTLINE_COLOR   = "&H00000000"   # Negro
+SUBTITLE_OUTLINE_WIDTH   = 3             # px — outline para legibilidad en cualquier fondo
+SUBTITLE_BOLD      = 1
+SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom
+SUBTITLE_MARGIN_V  = 480         # px desde borde inferior
+SUBTITLE_WORDS_PER_LINE = 4      # 4 palabras/grupo — estándar CapCut
 
 # ── Video ────────────────────────────────────────────────────────────────────
 TARGET_ASPECT = "9:16"
