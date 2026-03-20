@@ -21,10 +21,10 @@ from config import (
     SUBTITLE_FONT_NAME,
     SUBTITLE_FONT_SIZE,
     SUBTITLE_MARGIN_V,
+    SUBTITLE_MAX_GROUP,
     SUBTITLE_OUTLINE_COLOR,
     SUBTITLE_OUTLINE_WIDTH,
-    SUBTITLE_SECONDARY_COLOR,
-    SUBTITLE_WORDS_PER_LINE,
+    SUBTITLE_PAUSE_GAP,
     TARGET_WIDTH,
     TARGET_HEIGHT,
     VIDEO_CODEC,
@@ -74,7 +74,25 @@ def _seconds_to_ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-# ── Generación de ASS (karaoke por líneas, estilo CapCut) ────────────────────
+# ── Agrupación de palabras ────────────────────────────────────────────────────
+
+def _group_words(words: list) -> list[list]:
+    """
+    Agrupa palabras por pausas naturales o por tamaño máximo.
+    Cada grupo se mostrará como un bloque acumulativo en pantalla.
+    """
+    groups, current = [], []
+    for i, w in enumerate(words):
+        current.append(w)
+        is_last = i == len(words) - 1
+        gap = (words[i + 1]["start"] - w["end"]) if not is_last else 999
+        if len(current) >= SUBTITLE_MAX_GROUP or gap >= SUBTITLE_PAUSE_GAP or is_last:
+            groups.append(current)
+            current = []
+    return groups
+
+
+# ── Generación de ASS — efecto "grow" palabra por palabra ────────────────────
 
 def generate_word_ass(
     words: list,
@@ -85,35 +103,28 @@ def generate_word_ass(
     margin_v: int = SUBTITLE_MARGIN_V,
 ) -> str:
     """
-    Genera un archivo ASS con karaoke por líneas.
+    Genera ASS con efecto "grow": las palabras aparecen una por una exactamente
+    cuando se hablan y se QUEDAN acumuladas en pantalla.
 
-    Agrupa palabras en líneas de SUBTITLE_WORDS_PER_LINE palabras.
-    Cada línea es UN ÚNICO evento Dialogue — esto elimina la superposición
-    de eventos que causaba el "apilamiento vertical" de palabras en pantalla.
+    Técnica: un evento Dialogue por cada palabra nueva.
+    - Evento de palabra j = texto acumulado "w0 w1 ... wj"
+    - Start  = w_j.start  (cuando se empieza a hablar esa palabra)
+    - End    = w_{j+1}.start  (cuando empieza la siguiente)
+    - Último evento del grupo: End = siguiente_grupo.start (o w_n.end + 0.5)
 
-    Efecto visual (\\kf):
-    - Todas las palabras de la línea visibles en blanco (PrimaryColour)
-    - La palabra activa se va "llenando" de amarillo de izq. a der. (SecondaryColour)
-    - Las palabras ya dichas quedan en amarillo
-    → Lectura natural de izquierda a derecha y de arriba hacia abajo
-
-    Args:
-        words:       lista de dicts {start: float, end: float, word: str}
-        output_path: ruta de destino del archivo .ass
-
-    Returns:
-        output_path
+    Resultado: el texto crece palabra a palabra, sin desaparecer en medio.
+    Al final del grupo toda la pantalla se limpia y empieza el siguiente grupo.
     """
     if not words:
-        raise ValueError("La lista de palabras está vacía. ¿El transcript falló?")
+        raise ValueError("La lista de palabras está vacía.")
 
     header = _ASS_HEADER.format(
         play_res_x=play_res_x,
         play_res_y=play_res_y,
         fontname=SUBTITLE_FONT_NAME,
         fontsize=font_size,
-        primary=SUBTITLE_FONT_COLOR,        # amarillo → palabra activa
-        secondary=SUBTITLE_SECONDARY_COLOR, # blanco   → palabras inactivas (visibles)
+        primary=SUBTITLE_FONT_COLOR,
+        secondary=SUBTITLE_FONT_COLOR,   # mismo color, sin efecto karaoke
         outline=SUBTITLE_OUTLINE_COLOR,
         back="&H00000000",
         bold=SUBTITLE_BOLD,
@@ -122,46 +133,38 @@ def generate_word_ass(
         margin_v=margin_v,
     )
 
-    n     = SUBTITLE_WORDS_PER_LINE
-    lines = [words[i : i + n] for i in range(0, len(words), n)]
-
+    groups = _group_words(words)
     events = []
-    for li, line_words in enumerate(lines):
-        if not line_words:
-            continue
 
-        # Grupo empieza cuando se habla la primera palabra
-        line_start = _seconds_to_ass_time(line_words[0]["start"])
-
-        # Grupo termina justo cuando empieza el siguiente (transición instantánea,
-        # sin huecos ni overlaps — exactamente como CapCut).
-        if li < len(lines) - 1:
-            line_end = _seconds_to_ass_time(lines[li + 1][0]["start"])
+    for gi, group in enumerate(groups):
+        # Inicio del grupo siguiente (para saber hasta cuándo dura el último evento)
+        if gi < len(groups) - 1:
+            group_end_sec = groups[gi + 1][0]["start"]
         else:
-            line_end = _seconds_to_ass_time(line_words[-1]["end"] + 0.5)
+            group_end_sec = group[-1]["end"] + 0.5
 
-        # \k{cs}: en el estilo CapCut el secondary es BLANCO (todas las palabras
-        # del grupo son visibles desde que aparece el grupo). La palabra activa
-        # se ilumina en amarillo (primary). Las ya dichas quedan amarillas.
-        # cs = centisegundos que esta palabra está activa (hasta que empieza la siguiente).
-        parts = []
-        for i, w in enumerate(line_words):
-            if i < len(line_words) - 1:
-                cs = max(1, int(round((line_words[i + 1]["start"] - w["start"]) * 100)))
+        for j, w in enumerate(group):
+            # Texto acumulado: todas las palabras del grupo hasta j (inclusive)
+            accumulated = " ".join(
+                gw["word"].lower().replace("{", "\\{").replace("}", "\\}")
+                for gw in group[: j + 1]
+            )
+
+            start_sec = w["start"]
+            if j < len(group) - 1:
+                end_sec = group[j + 1]["start"]
             else:
-                # Última palabra: activa hasta el fin del grupo
-                if li < len(lines) - 1:
-                    cs = max(1, int(round((lines[li + 1][0]["start"] - w["start"]) * 100)))
-                else:
-                    cs = max(1, int(round((w["end"] - w["start"]) * 100)))
-            text = w["word"].lower().replace("{", "\\{").replace("}", "\\}")
-            parts.append(f"{{\\k{cs}}}{text}")
+                end_sec = group_end_sec
 
-        events.append(_ASS_DIALOGUE.format(
-            start=line_start,
-            end=line_end,
-            text=" ".join(parts),
-        ))
+            # Evitar eventos de duración cero o negativa
+            if end_sec <= start_sec:
+                end_sec = start_sec + 0.05
+
+            events.append(_ASS_DIALOGUE.format(
+                start=_seconds_to_ass_time(start_sec),
+                end=_seconds_to_ass_time(end_sec),
+                text=accumulated,
+            ))
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(header)
@@ -189,13 +192,12 @@ def words_to_srt(words: list, output_path: str) -> str:
     if not words:
         raise ValueError("La lista de palabras está vacía.")
 
-    n = SUBTITLE_WORDS_PER_LINE
-    groups = [words[i : i + n] for i in range(0, len(words), n)]
+    groups = _group_words(words)
 
     cues = []
     for idx, group in enumerate(groups, start=1):
         start = _seconds_to_srt_time(group[0]["start"])
-        end   = _seconds_to_srt_time(group[-1]["end"] + 0.05)
+        end   = _seconds_to_srt_time(group[-1]["end"] + 0.1)
         text  = " ".join(w["word"].lower() for w in group)
         cues.append(f"{idx}\n{start} --> {end}\n{text}\n")
 

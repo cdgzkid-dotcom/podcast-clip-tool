@@ -63,14 +63,16 @@ SUBTITLE_FONT_SIZE = 96          # pt — grande y legible en mobile
 # ASS usa formato AABBGGRR (no RRGGBBAA)
 # PrimaryColour   = palabra ACTIVA (hablándose ahora) → amarillo
 # SecondaryColour = palabras INACTIVAS del grupo (ya visibles, aún no dichas) → blanco
-SUBTITLE_FONT_COLOR      = "&H0000FFFF"   # Amarillo: palabra activa (R=FF,G=FF,B=00)
-SUBTITLE_SECONDARY_COLOR = "&H00FFFFFF"   # Blanco: palabras inactivas pero visibles
+SUBTITLE_FONT_COLOR      = "&H00FFFFFF"   # Blanco puro
+SUBTITLE_SECONDARY_COLOR = "&H00FFFFFF"   # (compatibilidad — no se usa en modo grow)
 SUBTITLE_OUTLINE_COLOR   = "&H00000000"   # Negro
-SUBTITLE_OUTLINE_WIDTH   = 3             # px — outline para legibilidad en cualquier fondo
+SUBTITLE_OUTLINE_WIDTH   = 3             # px outline
 SUBTITLE_BOLD      = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom
 SUBTITLE_MARGIN_V  = 480         # px desde borde inferior
-SUBTITLE_WORDS_PER_LINE = 4      # 4 palabras/grupo — estándar CapCut
+# Efecto "grow" — palabras aparecen y se acumulan (una por una conforme se hablan)
+SUBTITLE_MAX_GROUP = 6           # máx palabras acumuladas antes de limpiar pantalla
+SUBTITLE_PAUSE_GAP = 0.6         # segundos de pausa que fuerzan nuevo grupo
 
 # ── Video ────────────────────────────────────────────────────────────────────
 TARGET_ASPECT = "9:16"
