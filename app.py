@@ -811,7 +811,7 @@ with tab_script:
 
     if st.session_state.get("generated_script"):
         st.divider()
-        st.markdown(st.session_state["generated_script"])
+        st.code(st.session_state["generated_script"], language="markdown")
         st.download_button(
             label="⬇️ Descargar guión (.md)",
             data=st.session_state["generated_script"],
