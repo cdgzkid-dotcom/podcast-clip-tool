@@ -790,11 +790,13 @@ with tab_script:
         else:
             with st.spinner("Escribiendo guión con Claude..."):
                 try:
+                    hosts_str = PODCASTS[podcast_slug].get("hosts", "")
                     script = generate_podcast_script(
                         guest_name=guest_name,
                         guest_bio=guest_bio or "Sin bio proporcionada.",
                         topics=topics or "Temas generales del podcast.",
                         podcast_name=podcast_display,
+                        hosts=hosts_str,
                         season_number=season_number,
                         episode_number=episode_number,
                         duration_minutes=duration_min,
@@ -809,12 +811,12 @@ with tab_script:
 
     if st.session_state.get("generated_script"):
         st.divider()
-        st.text_area("Guión generado", value=st.session_state["generated_script"], height=500, key="script_output")
+        st.markdown(st.session_state["generated_script"])
         st.download_button(
-            label="⬇️ Descargar guión (.txt)",
+            label="⬇️ Descargar guión (.md)",
             data=st.session_state["generated_script"],
-            file_name=f"guion_{podcast_slug}_t{season_number:02d}_ep{episode_number:02d}.txt",
-            mime="text/plain",
+            file_name=f"guion_{podcast_slug}_t{season_number:02d}_ep{episode_number:02d}.md",
+            mime="text/markdown",
             key="dl_script",
         )
 

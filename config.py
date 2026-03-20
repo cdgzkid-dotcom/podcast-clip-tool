@@ -41,10 +41,12 @@ PODCASTS = {
     "ladrando-ideas": {
         "display_name": "Ladrando Ideas",
         "slug": "ladrando-ideas",
+        "hosts": "Christian + Kiko",
     },
     "ftbp": {
         "display_name": "Fuck The Business Plan",
         "slug": "ftbp",
+        "hosts": "Christian Dominguez + JC Rico",
     },
 }
 PODCAST_DISPLAY_NAMES = [p["display_name"] for p in PODCASTS.values()]

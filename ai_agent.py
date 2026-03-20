@@ -370,62 +370,46 @@ def generate_linkedin_image(image_prompt: str) -> bytes:
         return r.read()
 
 
-_SCRIPT_SYSTEM = """Eres productor de podcasts de negocios en español latinoamericano.
-Generas guiones de entrevista estructurados, conversacionales y directos.
-Sin frases corporativas, sin relleno. El host habla como persona real."""
+_SCRIPT_SYSTEM = """Eres productor ejecutivo de podcasts en español latinoamericano.
+Escribes guías de episodio detalladas, conversacionales y listas para grabar.
+El formato es Markdown porque se mostrará en una app con render visual.
+Cada bloque tiene objetivo, temas con bullet points, y una anécdota específica."""
 
-_SCRIPT_TEMPLATE = """Genera el guión completo para el episodio {season}x{episode}
-del podcast "{podcast_name}".
+_SCRIPT_TEMPLATE = """Genera la guía completa de episodio para el podcast "{podcast_name}".
 
-INVITADO: {guest_name}
-BIO:
-{guest_bio}
+DATOS DEL EPISODIO:
+- Invitado: {guest_name}
+- Hosts: {hosts}
+- Episodio: {season}x{episode}
+- Duración estimada: {duration} minutos
+- Bio del invitado: {guest_bio}
+- Temas a cubrir: {topics}
 
-TEMAS A CUBRIR:
-{topics}
+INSTRUCCIONES DE FORMATO — replica EXACTAMENTE esta estructura:
 
-DURACIÓN ESTIMADA: {duration} minutos
+1. Título en H1 con emoji relevante al tema: # 🐾 GUÍA DE EPISODIO: [TÍTULO CREATIVO EN MAYÚSCULAS]
+2. Metadata en negrita (Invitada/o, Hosts, Formato, Duración)
+3. Separador ---
+4. {num_blocks} bloques temáticos, cada uno con:
+   - H2 con número, nombre y rango de tiempo: ## BLOQUE N: NOMBRE (XX:00 - XX:00)
+   - Objetivo en cursiva: *Objetivo: ...*
+   - **Temas a desarrollar:** con lista de bullets (4-6 items, preguntas o temas)
+   - **Anécdota del bloque:** una pregunta específica para sacar una historia real
+   - Opcionalmente: una pregunta provocadora en cursiva entre comillas
+   - Separador --- al final de cada bloque (excepto el último)
+5. En uno de los bloques intermedios incluir: **Momento de conversación entre hosts:** en cursiva
+6. El último bloque termina con:
+   - **Cierre natural:** cómo cerrar ese bloque orgánicamente
+   - **Despedida estándar:** redes del invitado, redes del podcast, próximo episodio
 
-FORMATO OBLIGATORIO — texto plano, sin markdown, sin símbolos #, sin numeración de preguntas:
+TONO Y ESTILO:
+- Los temas son preguntas reales que haría un host curioso, no un académico
+- Las anécdotas piden historias concretas, no opiniones generales
+- El objetivo de cada bloque es para el host, no para el oyente
+- Español latinoamericano informal, directo, sin frases corporativas
+- Los títulos de bloque son creativos y descriptivos, no genéricos
 
-{podcast_name} — Episodio {season}x{episode}
-Invitado: {guest_name}
-
-INTRO DEL HOST
-[2-3 oraciones para abrir y presentar al invitado]
-
-BLOQUE 1 — CALENTAMIENTO
-
-[pregunta directa, sin número ni etiqueta]
-→ Seguimiento: [si la respuesta es corta o superficial]
-Por qué importa: [nota interna para el host, en cursiva en la mente, aquí en plano]
-
-[siguiente pregunta]
-→ Seguimiento: [...]
-Por qué importa: [...]
-
-[3-4 preguntas en total en este bloque, todas pegadas con un salto de línea entre cada una]
-
-BLOQUE 2 — EL CORE
-
-[5-6 preguntas profundas, mismo formato]
-
-BLOQUE 3 — CIERRE
-
-[2-3 preguntas + la pregunta final reflexiva, mismo formato]
-Para la pregunta final escribe: "Sin seguimiento. Déjalo cerrar solo."
-
-OUTRO DEL HOST
-[1-2 oraciones de cierre]
-
-REGLAS ESTRICTAS DE FORMATO:
-- Sin #, ##, **, ---, ni ningún símbolo markdown
-- Sin "Pregunta 1", "Pregunta 2", etc. — las preguntas van directo
-- Un salto de línea entre cada pregunta dentro del mismo bloque
-- Dos saltos de línea antes del título de cada nuevo bloque
-- Todo en texto plano que se pueda copiar y pegar directo
-
-Responde únicamente con el guión en el formato descrito, sin explicaciones."""
+Responde únicamente con la guía en Markdown, sin explicaciones previas."""
 
 
 def generate_podcast_script(
@@ -433,29 +417,32 @@ def generate_podcast_script(
     guest_bio: str,
     topics: str,
     podcast_name: str,
+    hosts: str,
     season_number: int,
     episode_number: int,
     duration_minutes: int = 60,
 ) -> str:
     """
-    Genera un guión estructurado de entrevista para el episodio.
+    Genera una guía de episodio estructurada en Markdown.
 
     Returns:
-        Guión como string listo para copiar/descargar
+        Guía como string Markdown listo para mostrar/descargar
     """
     client = anthropic.Anthropic(api_key=get_secret("ANTHROPIC_API_KEY"))
 
-    core_duration = max(duration_minutes - 25, 20)
+    # ~10 min por bloque
+    num_blocks = max(4, round(duration_minutes / 10))
 
     user_message = _SCRIPT_TEMPLATE.format(
         season=season_number,
         episode=episode_number,
         podcast_name=podcast_name,
+        hosts=hosts,
         guest_name=guest_name,
         guest_bio=guest_bio,
         topics=topics,
         duration=duration_minutes,
-        core_duration=core_duration,
+        num_blocks=num_blocks,
     )
 
     try:
