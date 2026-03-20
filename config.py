@@ -66,7 +66,7 @@ SUBTITLE_OUTLINE_WIDTH = 0       # sin outline — texto blanco limpio
 SUBTITLE_BOLD = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom (estándar ASS)
 SUBTITLE_MARGIN_V = 480          # px desde borde inferior — encima de la barra negra
-SUBTITLE_WORDS_PER_LINE = 6      # palabras por línea
+SUBTITLE_WORDS_PER_LINE = 4      # palabras por línea — más fluido
 
 # ── Video ────────────────────────────────────────────────────────────────────
 TARGET_ASPECT = "9:16"

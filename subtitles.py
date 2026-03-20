@@ -124,27 +124,39 @@ def generate_word_ass(
         margin_v=margin_v,
     )
 
-    n = SUBTITLE_WORDS_PER_LINE
+    n     = SUBTITLE_WORDS_PER_LINE
     lines = [words[i : i + n] for i in range(0, len(words), n)]
 
+    # Cap máximo por palabra: 60 cs (0.6 s).
+    # Evita que pausas largas del hablante "congelen" la animación.
+    _MAX_WORD_CS = 60
+
     events = []
-    for line_words in lines:
+    for li, line_words in enumerate(lines):
         if not line_words:
             continue
 
-        line_start = _seconds_to_ass_time(line_words[0]["start"])
-        line_end   = _seconds_to_ass_time(line_words[-1]["end"] + 0.05)
+        line_start_sec = line_words[0]["start"]
+        line_start     = _seconds_to_ass_time(line_start_sec)
 
-        # \k{cs}: la palabra arranca invisible (secondary=transparente)
-        # y aparece en blanco al llegar su turno.
-        # cs = tiempo hasta que aparece la SIGUIENTE palabra (mantiene el gap natural).
+        # Fin de línea = inicio de la siguiente línea (transición sin flash vacío).
+        # Para la última línea usamos el fin real + pequeño buffer.
+        if li < len(lines) - 1:
+            next_line = lines[li + 1]
+            line_end = _seconds_to_ass_time(next_line[0]["start"])
+        else:
+            line_end = _seconds_to_ass_time(line_words[-1]["end"] + 0.3)
+
+        # \k{cs}: cada palabra arranca invisible y aparece en blanco en su momento.
+        # cs = duración real hasta que aparece la SIGUIENTE palabra,
+        #      capada a _MAX_WORD_CS para que pausas no se vean lentas.
         parts = []
         for i, w in enumerate(line_words):
             if i < len(line_words) - 1:
-                duration_sec = line_words[i + 1]["start"] - w["start"]
+                raw_cs = (line_words[i + 1]["start"] - w["start"]) * 100
             else:
-                duration_sec = max(0.1, w["end"] - w["start"])
-            cs   = max(1, int(round(duration_sec * 100)))
+                raw_cs = max(10, (w["end"] - w["start"]) * 100)
+            cs   = max(1, min(_MAX_WORD_CS, int(round(raw_cs))))
             text = w["word"].lower().replace("{", "\\{").replace("}", "\\}")
             parts.append(f"{{\\k{cs}}}{text}")
 
