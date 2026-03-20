@@ -135,14 +135,23 @@ def generate_word_ass(
         line_start = _seconds_to_ass_time(line_words[0]["start"])
         line_end   = _seconds_to_ass_time(line_words[-1]["end"] + 0.05)
 
-        line_text = " ".join(
-            w["word"].lower().replace("{", "\\{").replace("}", "\\}")
-            for w in line_words
-        )
+        # \k{cs}: la palabra arranca invisible (secondary=transparente)
+        # y aparece en blanco al llegar su turno.
+        # cs = tiempo hasta que aparece la SIGUIENTE palabra (mantiene el gap natural).
+        parts = []
+        for i, w in enumerate(line_words):
+            if i < len(line_words) - 1:
+                duration_sec = line_words[i + 1]["start"] - w["start"]
+            else:
+                duration_sec = max(0.1, w["end"] - w["start"])
+            cs   = max(1, int(round(duration_sec * 100)))
+            text = w["word"].lower().replace("{", "\\{").replace("}", "\\}")
+            parts.append(f"{{\\k{cs}}}{text}")
+
         events.append(_ASS_DIALOGUE.format(
             start=line_start,
             end=line_end,
-            text=line_text,
+            text=" ".join(parts),
         ))
 
     with open(output_path, "w", encoding="utf-8") as f:

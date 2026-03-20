@@ -60,7 +60,7 @@ SUBTITLE_FONTS_DIR = "/usr/share/fonts/truetype/roboto"  # ruta Debian post-inst
 SUBTITLE_FONT_SIZE = 96          # pt — grande y legible en mobile
 SUBTITLE_FONT_COLOR = "&H00FFFFFF"     # Blanco (ASS: AABBGGRR)
 SUBTITLE_OUTLINE_COLOR = "&H00000000" # Negro
-SUBTITLE_OUTLINE_WIDTH = 7       # px — outline grueso para máxima nitidez
+SUBTITLE_OUTLINE_WIDTH = 0       # sin outline — texto blanco limpio
 SUBTITLE_BOLD = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom (estándar ASS)
 SUBTITLE_MARGIN_V = 480          # px desde borde inferior — encima de la barra negra
