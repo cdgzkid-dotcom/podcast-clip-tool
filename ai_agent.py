@@ -386,30 +386,46 @@ TEMAS A CUBRIR:
 
 DURACIÓN ESTIMADA: {duration} minutos
 
-ESTRUCTURA OBLIGATORIA:
+FORMATO OBLIGATORIO — texto plano, sin markdown, sin símbolos #, sin numeración de preguntas:
 
-## INTRO DEL HOST
-(2-3 oraciones para abrir el episodio y presentar al invitado)
+{podcast_name} — Episodio {season}x{episode}
+Invitado: {guest_name}
 
-## BLOQUE 1 — CALENTAMIENTO (primeros 10-15 min)
-3-4 preguntas para conocer al invitado. Fáciles, que lo pongan en contexto.
-Por cada pregunta:
-- Pregunta principal
-- Seguimiento si la respuesta es superficial
-- _Por qué esta pregunta importa (nota interna para el host)_
+INTRO DEL HOST
+[2-3 oraciones para abrir y presentar al invitado]
 
-## BLOQUE 2 — EL CORE ({core_duration} min)
-5-6 preguntas profundas sobre los temas clave. Aquí va la carne del episodio.
-Misma estructura que el bloque 1.
+BLOQUE 1 — CALENTAMIENTO
 
-## BLOQUE 3 — CIERRE (últimos 5-10 min)
-2-3 preguntas de cierre + una pregunta final reflexiva.
-Misma estructura.
+[pregunta directa, sin número ni etiqueta]
+→ Seguimiento: [si la respuesta es corta o superficial]
+Por qué importa: [nota interna para el host, en cursiva en la mente, aquí en plano]
 
-## OUTRO DEL HOST
-(1-2 oraciones para cerrar, mencionar dónde seguir al invitado)
+[siguiente pregunta]
+→ Seguimiento: [...]
+Por qué importa: [...]
 
-Responde únicamente con el guión en texto plano con los encabezados de sección."""
+[3-4 preguntas en total en este bloque, todas pegadas con un salto de línea entre cada una]
+
+BLOQUE 2 — EL CORE
+
+[5-6 preguntas profundas, mismo formato]
+
+BLOQUE 3 — CIERRE
+
+[2-3 preguntas + la pregunta final reflexiva, mismo formato]
+Para la pregunta final escribe: "Sin seguimiento. Déjalo cerrar solo."
+
+OUTRO DEL HOST
+[1-2 oraciones de cierre]
+
+REGLAS ESTRICTAS DE FORMATO:
+- Sin #, ##, **, ---, ni ningún símbolo markdown
+- Sin "Pregunta 1", "Pregunta 2", etc. — las preguntas van directo
+- Un salto de línea entre cada pregunta dentro del mismo bloque
+- Dos saltos de línea antes del título de cada nuevo bloque
+- Todo en texto plano que se pueda copiar y pegar directo
+
+Responde únicamente con el guión en el formato descrito, sin explicaciones."""
 
 
 def generate_podcast_script(
