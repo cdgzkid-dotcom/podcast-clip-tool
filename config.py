@@ -66,7 +66,7 @@ SUBTITLE_FONT_SIZE = 96          # pt — grande y legible en mobile
 SUBTITLE_FONT_COLOR      = "&H00FFFFFF"   # Blanco puro
 SUBTITLE_SECONDARY_COLOR = "&H00FFFFFF"   # (compatibilidad — no se usa en modo grow)
 SUBTITLE_OUTLINE_COLOR   = "&H00000000"   # Negro
-SUBTITLE_OUTLINE_WIDTH   = 3             # px outline
+SUBTITLE_OUTLINE_WIDTH   = 0             # sin outline
 SUBTITLE_BOLD      = 1
 SUBTITLE_ALIGNMENT = 2           # 2 = center-bottom
 SUBTITLE_MARGIN_V  = 480         # px desde borde inferior
