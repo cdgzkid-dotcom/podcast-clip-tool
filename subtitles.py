@@ -127,36 +127,38 @@ def generate_word_ass(
     n     = SUBTITLE_WORDS_PER_LINE
     lines = [words[i : i + n] for i in range(0, len(words), n)]
 
-    # Cap máximo por palabra: 60 cs (0.6 s).
-    # Evita que pausas largas del hablante "congelen" la animación.
-    _MAX_WORD_CS = 60
-
     events = []
     for li, line_words in enumerate(lines):
         if not line_words:
             continue
 
-        line_start_sec = line_words[0]["start"]
-        line_start     = _seconds_to_ass_time(line_start_sec)
+        line_start = _seconds_to_ass_time(line_words[0]["start"])
 
-        # Fin de línea = inicio de la siguiente línea (transición sin flash vacío).
-        # Para la última línea usamos el fin real + pequeño buffer.
+        # La línea dura hasta que la ÚLTIMA palabra del grupo termina +0.15s de hold.
+        # La siguiente línea arranca en su propia primera palabra.
+        # Esto evita huecos Y evita que la línea desaparezca antes de tiempo.
+        hold_end   = line_words[-1]["end"] + 0.15
         if li < len(lines) - 1:
-            next_line = lines[li + 1]
-            line_end = _seconds_to_ass_time(next_line[0]["start"])
+            next_start = lines[li + 1][0]["start"]
+            # Si el siguiente grupo empieza antes del hold, respetamos el hold
+            # para que la línea nunca "desaparezca" antes de que se vea la siguiente.
+            line_end_sec = max(hold_end, next_start - 0.02)
         else:
-            line_end = _seconds_to_ass_time(line_words[-1]["end"] + 0.3)
+            line_end_sec = hold_end + 0.3
 
-        # \k{cs}: cada palabra arranca invisible y aparece en blanco en su momento.
-        # cs = duración real hasta que aparece la SIGUIENTE palabra,
-        #      capada a _MAX_WORD_CS para que pausas no se vean lentas.
+        line_end = _seconds_to_ass_time(line_end_sec)
+
+        # \k{cs}: cada palabra arranca invisible (secondary=transparente) y aparece
+        # en blanco en cuanto es su turno. cs = tiempo hasta la SIGUIENTE palabra.
+        # Sin cap: respetamos el ritmo natural del hablante — si hace pausa, la
+        # palabra anterior permanece visible en pantalla (no desaparece).
         parts = []
         for i, w in enumerate(line_words):
             if i < len(line_words) - 1:
                 raw_cs = (line_words[i + 1]["start"] - w["start"]) * 100
             else:
-                raw_cs = max(10, (w["end"] - w["start"]) * 100)
-            cs   = max(1, min(_MAX_WORD_CS, int(round(raw_cs))))
+                raw_cs = max(10, (line_end_sec - w["start"]) * 100)
+            cs   = max(1, int(round(raw_cs)))
             text = w["word"].lower().replace("{", "\\{").replace("}", "\\}")
             parts.append(f"{{\\k{cs}}}{text}")
 
