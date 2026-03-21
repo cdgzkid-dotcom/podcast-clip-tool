@@ -49,7 +49,6 @@ from ai_agent import (
     generate_instagram_caption,
     generate_episode_description,
     generate_linkedin_clip_copy,
-    generate_podcast_script,
 )
 from exporter import package_clip_output
 
@@ -384,21 +383,12 @@ def _archive_ensure_episode(slug: str, display: str, season: int, episode: int) 
             "episode": episode,
             "date": date.today().isoformat(),
             "guest_name": "",
-            "script": "",
             "spotify_title": "",
             "spotify_description": "",
             "clips": [],
         }
         _save_archive(archive)
     return archive
-
-
-def _archive_set_script(slug, display, season, episode, guest_name, script):
-    archive = _archive_ensure_episode(slug, display, season, episode)
-    key = _ep_key(slug, season, episode)
-    archive["episodes"][key]["guest_name"] = guest_name
-    archive["episodes"][key]["script"] = script
-    _save_archive(archive)
 
 
 def _archive_set_spotify(slug, display, season, episode, title, description):
@@ -439,8 +429,6 @@ def _archive_to_text(archive: dict) -> str:
         if ep.get("date"):
             lines.append(f"Fecha: {ep['date']}")
         lines.append("")
-        if ep.get("script"):
-            lines += ["── GUIÓN ──", ep["script"], ""]
         if ep.get("spotify_title"):
             lines += [
                 "── SPOTIFY ──",
@@ -546,7 +534,7 @@ with st.sidebar:
 
 bg_bytes = st.session_state.bg_ladrando if podcast_slug == "ladrando-ideas" else st.session_state.bg_ftbp
 
-tab_clips, tab_script, tab_archive = st.tabs(["🎬 Clips", "✍️ Guión", "📚 Archivo"])
+tab_clips, tab_archive = st.tabs(["🎬 Clips", "📚 Archivo"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -762,78 +750,19 @@ with tab_clips:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — GUIÓN
-# ═══════════════════════════════════════════════════════════════════════════════
-
-with tab_script:
-    st.subheader("✍️ Generador de Guión")
-    st.caption(f"Podcast: **{podcast_display}** · T{season_number:02d}E{episode_number:02d}")
-
-    guest_name = st.text_input("Nombre del invitado", placeholder="Ej: Iván Vázquez", key="script_guest_name")
-    guest_bio  = st.text_area(
-        "Bio del invitado",
-        placeholder="Quién es, qué hace, por qué es relevante para el podcast...",
-        height=120,
-        key="script_guest_bio",
-    )
-    topics = st.text_area(
-        "Temas a cubrir",
-        placeholder="Ej:\n- Cómo nació su empresa después de una bancarrota\n- La decisión de no tener plan B\n- Expansión a mercado USA",
-        height=120,
-        key="script_topics",
-    )
-    duration_min = st.slider("Duración estimada del episodio (minutos)", 30, 120, 60, step=15, key="script_duration")
-
-    if st.button("📝 Generar guión", type="primary", key="btn_generate_script"):
-        if not guest_name.strip():
-            st.warning("Escribe el nombre del invitado para continuar.")
-        else:
-            with st.spinner("Escribiendo guión con Claude..."):
-                try:
-                    hosts_str = PODCASTS[podcast_slug].get("hosts", "")
-                    script = generate_podcast_script(
-                        guest_name=guest_name,
-                        guest_bio=guest_bio or "Sin bio proporcionada.",
-                        topics=topics or "Temas generales del podcast.",
-                        podcast_name=podcast_display,
-                        hosts=hosts_str,
-                        season_number=season_number,
-                        episode_number=episode_number,
-                        duration_minutes=duration_min,
-                    )
-                    st.session_state["generated_script"] = script
-                    st.session_state["script_guest_name_saved"] = guest_name
-                    # Guardar en archivo
-                    _archive_set_script(podcast_slug, podcast_display, season_number, episode_number, guest_name, script)
-                    st.success("✅ Guión guardado en el Archivo automáticamente.")
-                except Exception as e:
-                    st.error(f"Error al generar guión: {e}")
-
-    if st.session_state.get("generated_script"):
-        st.divider()
-        st.code(st.session_state["generated_script"], language="markdown")
-        st.download_button(
-            label="⬇️ Descargar guión (.md)",
-            data=st.session_state["generated_script"],
-            file_name=f"guion_{podcast_slug}_t{season_number:02d}_ep{episode_number:02d}.md",
-            mime="text/markdown",
-            key="dl_script",
-        )
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — ARCHIVO
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_archive:
     st.subheader("📚 Archivo de Episodios")
-    st.caption("Solo texto: guiones, copies de Instagram y LinkedIn. Sin audio ni video.")
+    st.caption("Copies de Instagram y LinkedIn por episodio. Sin audio ni video.")
 
     archive = _load_archive()
     episodes = archive.get("episodes", {})
 
     if not episodes:
-        st.info("El archivo está vacío. Genera guiones o clips para que aparezcan aquí.")
+        st.info("El archivo está vacío. Genera clips para que aparezcan aquí.")
     else:
         # Botón para descargar todo como un solo .txt
         full_text = _archive_to_text(archive)
@@ -856,17 +785,6 @@ with tab_archive:
                 label += f" · {ep['date']}"
 
             with st.expander(label, expanded=False):
-                if ep.get("script"):
-                    st.markdown("**📝 Guión**")
-                    st.text_area("", value=ep["script"], height=200, key=f"arc_script_{key}")
-                    st.download_button(
-                        "⬇️ Guión",
-                        data=ep["script"],
-                        file_name=f"guion_{key}.txt",
-                        mime="text/plain",
-                        key=f"dl_arc_script_{key}",
-                    )
-
                 if ep.get("spotify_title"):
                     st.markdown("**🎧 Spotify**")
                     st.text(f"Título: {ep['spotify_title']}")
