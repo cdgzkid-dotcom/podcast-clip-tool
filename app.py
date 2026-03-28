@@ -567,7 +567,7 @@ with tab_clips:
         col_norm, col_skip = st.columns(2)
         if col_norm.button("🔊 Normalizar volumen antes de analizar", use_container_width=True):
             temp_dir = _get_or_create_temp_dir()
-            normalized_path = os.path.join(temp_dir, "episode_normalized.mp3")
+            normalized_path = tempfile.mktemp(suffix="_normalized.mp3", dir=temp_dir)
             with st.spinner("Normalizando volumen... (puede tardar 1-2 min)"):
                 try:
                     normalize_audio(st.session_state.audio_path, normalized_path)
